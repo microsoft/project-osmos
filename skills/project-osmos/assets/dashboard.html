@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Project Osmos — Status</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f3f3f3;
+      --surface: #ffffff;
+      --surface-2: #fafafa;
+      --surface-hover: #f5f5f5;
+      --surface-sel: #e6f0ff;
+      --fg: #242424;
+      --fg-2: #424242;
+      --fg-3: #616161;
+      --fg-muted: #a0a0a0;
+      --border: #e0e0e0;
+      --border-soft: #e8e8e8;
+      --border-strong: #d0d0d0;
+      --accent: #0f6cbd;
+      --accent-soft: #e8f0fe;
+      --accent-hover: #f0f6ff;
+      --green: #107c10;
+      --green-soft: #dff6dd;
+      --green-hover: #f3faf3;
+      --ok: #107c10;
+      --warn-bg: #fff8e6;
+      --warn-border: #f0e8d0;
+      --warn-fg: #8a6d00;
+      --err: #d13438;
+      --err-bg: #fdf3f4;
+      --err-border: #f1bbbd;
+      --mono: 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+      --sans: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--mono); }
+    pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; overflow: auto; font-size: 12px; color: var(--fg); margin: 0; }
+
+    /* Top breadcrumb bar — mimics Fabric ws-topbar */
+    .topbar {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 16px; min-height: 40px;
+    }
+    .topbar .crumb { color: var(--fg-3); font-size: 13px; }
+    .topbar .crumb-sep { color: #b0b0b0; font-size: 11px; }
+    .topbar .crumb-active { color: var(--fg); font-weight: 600; }
+    .topbar .spacer { flex: 1; }
+    .topbar .controls { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-3); }
+    .topbar .controls button {
+      background: transparent; color: var(--fg-2); border: none;
+      padding: 4px 10px; font-size: 12px; cursor: pointer; border-radius: 4px;
+      font-family: inherit;
+    }
+    .topbar .controls button:hover { background: var(--surface-hover); color: var(--fg); }
+    .topbar .controls .last-poll { color: var(--fg-3); padding: 0 8px; }
+
+    /* Status pill — Fabric uses small status text + colored dot */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border);
+    }
+    .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-muted); }
+    .status-Created   { background: var(--surface-2); color: var(--fg-3); }
+    .status-Running   { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+    .status-Running .dot { background: var(--accent); }
+    .status-Cancelling { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+    .status-Cancelling .dot { background: var(--warn-fg); }
+    .status-Completed { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+    .status-Completed .dot { background: var(--green); }
+    .status-Failed    { background: var(--err-bg); color: var(--err); border-color: var(--err-border); }
+    .status-Failed .dot { background: var(--err); }
+    .status-Cancelled, .status-Canceled { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+    .status-Cancelled .dot, .status-Canceled .dot { background: var(--warn-fg); }
+
+    /* Tabs — Fabric ws-tabs */
+    nav.tabs {
+      display: flex; gap: 0; background: var(--surface);
+      border-bottom: 1px solid var(--border); padding: 0 16px;
+    }
+    nav.tabs button {
+      background: transparent; color: var(--fg-3); border: none;
+      border-bottom: 2px solid transparent;
+      padding: 8px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+      display: flex; align-items: center; gap: 6px; white-space: nowrap;
+    }
+    nav.tabs button:hover { color: var(--fg); }
+    nav.tabs button.active { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+    nav.tabs button .badge {
+      background: var(--surface-hover); color: var(--fg-3);
+      border-radius: 10px; padding: 1px 7px; font-size: 11px; font-weight: 500;
+    }
+    nav.tabs button.active .badge { background: var(--accent-soft); color: var(--accent); }
+
+    main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* CLI / terminal look for all card content. Page chrome stays Fabric-light. */
+    main .card,
+    main .panel .msg,
+    main .panel .filters {
+      background: #0d1117;
+      border: 1px solid #2d333b;
+      color: #c9d1d9;
+      margin-bottom: 12px;
+    }
+    main .card {
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px rgba(15, 108, 189, 0.04);
+      font-family: var(--mono);
+    }
+    main .card h2 {
+      color: #7d8590;
+      font-family: var(--sans);
+      border-bottom: 1px dashed #2d333b;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer; user-select: none;
+    }
+    main .card h2 .twist {
+      color: #6e7681; font-size: 10px; width: 10px; display: inline-block;
+      transition: transform 120ms ease;
+    }
+    main .card.collapsed h2 { border-bottom-color: transparent; padding-bottom: 0; margin-bottom: 0; }
+    main .card.collapsed h2 .twist { transform: rotate(-90deg); }
+    main .card.collapsed .card-body { display: none; }
+    main .card-title { color: #e6edf3; font-family: var(--sans); }
+    main .kv dt { color: #7d8590; font-family: var(--sans); }
+    main .kv dd { color: #c9d1d9; font-family: var(--mono); font-size: 12px; }
+    main .kv dd .id { color: #6e7681; }
+    main pre {
+      background: #010409;
+      border: 1px solid #2d333b;
+      color: #c9d1d9;
+      font-size: 12px;
+    }
+    main .qa { border-left-color: #2d333b; }
+    main .qa.recommended { border-left-color: #3fb950; }
+    main .qa .q { color: #7d8590; font-family: var(--sans); }
+    main .qa .q-id { color: #58a6ff; }
+    main .qa .a { color: #c9d1d9; }
+    main .qa .a .key {
+      background: #161b22; border-color: #30363d; color: #79c0ff;
+    }
+    main .qa .a .rec-tag { color: #3fb950; }
+    main .qa .scope { color: #6e7681; }
+    main .copy-btn {
+      background: #161b22; border-color: #30363d; color: #58a6ff;
+    }
+    main .copy-btn:hover { background: #21262d; border-color: #58a6ff; }
+    main .empty {
+      background: #0d1117; border-color: #2d333b; color: #7d8590;
+    }
+    main .banner.terminal-ok {
+      background: #0f2a1a; border-color: #2ea043; color: #3fb950;
+    }
+    main .banner.terminal-fail {
+      background: #2c1717; border-color: #f85149; color: #ff7b72;
+    }
+    /* faint traffic-light row so cards read as terminals */
+    main .card::before {
+      content: "● ● ●";
+      display: block;
+      color: #30363d;
+      font-size: 10px;
+      letter-spacing: 4px;
+      margin: -4px 0 8px;
+    }
+    /* Updates feed: keep darker bubbles, brighter role badges */
+    main .panel .msg { border-radius: 6px; padding: 10px 14px; }
+    main .panel .msg .meta { color: #7d8590; }
+    main .panel .msg .text { color: #c9d1d9; }
+    main .panel .msg.role-assistant .role-badge { background: #0d2647; color: #58a6ff; }
+    main .panel .msg.role-tool      .role-badge { background: #0f2a1a; color: #3fb950; }
+    main .panel .msg .meta .seq {
+      font-family: var(--mono); color: #6e7681; font-size: 11px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 3px;
+      padding: 1px 6px; margin-right: 2px;
+    }
+    main .panel .msg.role-user      .role-badge { background: #2d2010; color: #d4a72c; }
+    main .panel .msg.role-system    .role-badge { background: #21262d; color: #7d8590; }
+    main .panel .msg .meta .repeats {
+      background: #2d2010; color: #d4a72c;
+      border: 1px solid #5c4108; border-radius: 10px;
+      padding: 1px 8px; font-size: 11px; font-weight: 600;
+      margin-left: 4px;
+    }
+    main .panel .msg .meta .last-seen {
+      color: #6e7681; font-size: 11px; font-style: italic;
+      margin-left: 4px;
+    }
+    main .panel .msg .meta .author {
+      color: #c9d1d9; font-size: 11px;
+      background: #1f2937; border: 1px solid #30363d; border-radius: 10px;
+      padding: 1px 8px; margin-left: 4px;
+    }
+    main .panel .msg.role-user .meta .author { background: #2d2010; color: #d4a72c; border-color: #5c4108; }
+    main .panel .msg.repeated { border-left: 2px solid #d4a72c; padding-left: 12px; }
+
+    /* Per-card toolbar (Raw/Rendered toggle on the left, Copy/etc on the right) */
+    .card-toolbar {
+      display: flex; gap: 8px; justify-content: space-between;
+      align-items: center; margin-bottom: 10px;
+    }
+    .md-toggle-group {
+      display: inline-flex; border: 1px solid #30363d; border-radius: 6px;
+      overflow: hidden; background: #0d1117;
+    }
+    .md-toggle-group .md-seg {
+      background: transparent; color: #8b949e; border: none;
+      padding: 5px 14px; font-size: 12px; font-family: var(--sans);
+      font-weight: 500; cursor: pointer; line-height: 1.4;
+      border-right: 1px solid #30363d;
+    }
+    .md-toggle-group .md-seg:last-child { border-right: none; }
+    .md-toggle-group .md-seg:hover { color: #c9d1d9; background: #161b22; }
+    .md-toggle-group .md-seg.active {
+      background: #1f6feb; color: #fff; cursor: default;
+    }
+    .md-toggle-group .md-seg.active:hover { background: #1f6feb; color: #fff; }
+
+    /* Dark-context overrides — cards inside .panel use dark backgrounds, so
+       text colors inherited from light-theme CSS vars (--fg=#242424) become
+       invisible. Force readable colors here. */
+    main .panel .card { color: #c9d1d9; }
+    main .panel .card .card-title { color: #e6edf3 !important; font-size: 15px; font-weight: 600; }
+    main .panel .card pre {
+      background: #161b22 !important; border-color: #30363d !important;
+      color: #c9d1d9 !important; font-size: 12.5px;
+    }
+    main .panel .card .kv dt { color: #8b949e; }
+    main .panel .card .kv dd { color: #c9d1d9; }
+    main .panel .card .kv dd .id { color: #8b949e; }
+    main .panel .card .qa { border-left-color: #30363d; }
+    main .panel .card .qa .q { color: #8b949e; }
+    main .panel .card .qa .a { color: #c9d1d9; }
+    main .panel .card .qa .a .key { background: #161b22; border-color: #30363d; color: #e6edf3; }
+    main .panel .card .qa .scope { color: #6e7681; }
+
+    /* Markdown rendering (dark-context). Hardcoded colors so it never
+       inherits the light-theme --fg. */
+    .md { color: #c9d1d9; font-family: var(--sans); font-size: 13.5px; line-height: 1.55; }
+    .md > *:first-child { margin-top: 0; }
+    .md > *:last-child { margin-bottom: 0; }
+    .md h1, .md h2, .md h3 { color: #e6edf3; font-weight: 600; line-height: 1.3; margin: 14px 0 6px; }
+    .md h4, .md h5, .md h6 { color: #b1bac4; font-weight: 600; line-height: 1.3; margin: 12px 0 4px; }
+    .md h1 { font-size: 18px; border-bottom: 1px solid #30363d; padding-bottom: 4px; }
+    .md h2 { font-size: 16px; border-bottom: 1px solid #30363d; padding-bottom: 3px; }
+    .md h3 { font-size: 14px; }
+    .md h4, .md h5, .md h6 { font-size: 13px; }
+    .md p { color: #c9d1d9; margin: 6px 0; }
+    .md ul, .md ol { color: #c9d1d9; margin: 6px 0; padding-left: 22px; }
+    .md li { margin: 2px 0; }
+    .md li.indent-1 { margin-left: 14px; }
+    .md li.indent-2 { margin-left: 28px; }
+    .md li.indent-3 { margin-left: 42px; }
+    .md li.indent-4 { margin-left: 56px; }
+    .md strong { color: #f0f6fc; }
+    .md em { color: #c9d1d9; }
+    .md code {
+      font-family: var(--mono); font-size: 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 3px;
+      padding: 0 4px; color: #e6edf3;
+    }
+    .md pre.md-code {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      padding: 8px 10px; overflow-x: auto; margin: 8px 0; color: #c9d1d9;
+    }
+    .md pre.md-code code { background: none; border: none; padding: 0; color: #c9d1d9; }
+    .md blockquote {
+      border-left: 3px solid #30363d; padding: 2px 10px;
+      color: #8b949e; margin: 6px 0;
+    }
+    .md a { color: #58a6ff; text-decoration: none; }
+    .md a:hover { text-decoration: underline; }
+    main .panel .filters { border-radius: 4px; padding: 8px 14px; display: flex !important; flex-wrap: wrap; gap: 18px !important; align-items: center; }
+    main .panel .filters label.order {
+      margin-left: auto !important;
+      color: #7d8590; font-family: var(--sans);
+      display: inline-flex; align-items: center; gap: 8px;
+      text-align: right;
+    }
+    main .panel .filters label.order select {
+      background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px;
+      padding: 2px 6px; font-family: inherit; font-size: 12px; margin-left: 6px;
+    }
+    main .panel .filters label { color: #c9d1d9; }
+
+    .banner {
+      padding: 8px 14px; border-radius: 4px; margin-bottom: 16px;
+      font-size: 13px; display: flex; align-items: center; gap: 8px;
+      border: 1px solid var(--border);
+    }
+    .banner.terminal-ok    { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+    .banner.terminal-fail  { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+    .banner.stale          { background: #3d2e0a; border-color: #8a6d1f; color: #f0c674; }
+    .banner.retrying       { background: #1f2f3d; border-color: #2f5f8a; color: #79b8ff; }
+    .banner.retry-trigger  { background: #3d2e0a; border-color: #8a6d1f; color: #f0c674; }
+    .banner.auth-broken    { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+    .banner code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; background: rgba(255,255,255,0.06); border-radius: 3px; }
+    .banner .dismiss-btn {
+      margin-left: auto; background: transparent; border: 1px solid currentColor;
+      color: inherit; border-radius: 4px; padding: 2px 8px; font: inherit;
+      font-size: 12px; cursor: pointer; opacity: 0.85;
+    }
+    .banner .dismiss-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+
+    .recovery-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 12px; font-size: 11px;
+      margin-left: 6px; border: 1px solid var(--border);
+    }
+    .recovery-pill.ok         { background: #0f2f1a; border-color: #1d6b3a; color: #56d364; }
+    .recovery-pill.neutral    { background: var(--surface-2); border-color: var(--border-strong); color: var(--fg-3); }
+    .recovery-pill.retry      { background: #1f2f3d; border-color: #2f5f8a; color: #79b8ff; }
+    .recovery-pill.retry.warn { background: #3d2e0a; border-color: #8a6d1f; color: #f0c674; }
+    .recovery-pill.auth-bad   { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+    .recovery-pill.exhausted  { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+
+    /* Cards — Fabric uses flat surfaces with subtle borders */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; padding: 16px 20px; margin-bottom: 12px;
+    }
+    .card h2 {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--fg-3); margin: 0 0 12px; font-weight: 600;
+    }
+    .card .card-title { font-size: 14px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+
+    .kv { display: grid; grid-template-columns: 180px 1fr; gap: 8px 16px; }
+    .kv dt { color: var(--fg-3); font-size: 13px; }
+    .kv dd { margin: 0; font-size: 13px; color: var(--fg); word-break: break-all; }
+    .kv dd .muted { color: var(--fg-muted); }
+    .kv dd .id { font-family: var(--mono); font-size: 12px; color: var(--fg-3); }
+
+    .qa {
+      border-left: 2px solid var(--border);
+      padding: 6px 14px; margin-bottom: 10px;
+    }
+    .qa.recommended { border-left-color: var(--accent); }
+    .qa .q-id { font-size: 11px; color: var(--accent); font-weight: 600; margin-right: 8px; }
+    .qa .q { font-size: 12px; color: var(--fg-3); margin-bottom: 4px; }
+    .qa .a { font-size: 13px; color: var(--fg); }
+    .qa .a .key { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--surface-2); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); }
+    .qa .a .rec-tag { font-size: 11px; color: var(--accent); margin-left: 8px; font-weight: 500; }
+    .qa .scope { font-size: 11px; color: var(--fg-muted); margin-top: 4px; }
+
+    .copy-btn {
+      float: right; background: transparent; color: var(--accent);
+      border: 1px solid var(--border-strong); border-radius: 4px;
+      padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+    }
+    .copy-btn:hover { background: var(--accent-hover); border-color: var(--accent); }
+
+    /* Updates feed — Fabric chat-style cards */
+    .feed { display: flex; flex-direction: column; gap: 8px; }
+    .feed .msg {
+      background: var(--surface); border: 1px solid var(--border-soft);
+      border-radius: 8px; padding: 10px 14px;
+    }
+    .feed .msg .meta {
+      display: flex; align-items: center; gap: 10px; font-size: 11px;
+      color: var(--fg-3); margin-bottom: 6px;
+    }
+    .feed .msg .role-badge {
+      font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+    }
+    .feed .msg.role-assistant .role-badge { background: var(--accent-soft); color: var(--accent); }
+    .feed .msg.role-tool      .role-badge { background: var(--green-soft); color: var(--green); }
+    .feed .msg.role-user      .role-badge { background: #fef3e0; color: #8a5a00; }
+    .feed .msg.role-system    .role-badge { background: var(--surface-hover); color: var(--fg-3); }
+    .feed .msg .text {
+      font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--fg);
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+    .feed .filters {
+      display: flex; gap: 12px; margin-bottom: 12px; padding: 8px 14px;
+      background: var(--surface); border: 1px solid var(--border-soft); border-radius: 4px;
+    }
+    .feed .filters label {
+      font-size: 12px; color: var(--fg-2); display: flex; align-items: center;
+      gap: 5px; cursor: pointer;
+    }
+    .feed .filters input[type="checkbox"] { accent-color: var(--accent); }
+
+    .empty {
+      color: var(--fg-3); font-style: italic; padding: 32px;
+      text-align: center; background: var(--surface);
+      border: 1px dashed var(--border); border-radius: 4px;
+    }
+
+    .schema-mismatch {
+      background: var(--err-bg); color: var(--err);
+      border: 1px solid var(--err-border); padding: 16px;
+      border-radius: 4px; margin: 24px;
+    }
+
+    /* Subtle Fabric-style page header above tabs */
+    .page-head {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+    .page-head h1 {
+      margin: 0 0 4px; font-size: 18px; font-weight: 600; color: var(--fg);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .page-head .sub {
+      font-size: 12px; color: var(--fg-3); font-family: var(--mono);
+    }
+    .page-head .summary {
+      font-size: 13px; color: var(--fg-2); font-family: var(--sans);
+      margin-top: 4px; line-height: 1.4; max-width: 1100px;
+    }
+
+    /* Pin chrome (breadcrumb + title + tabs) so it stays put while scrolling. */
+    .sticky-chrome {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--surface);
+      box-shadow: 0 1px 0 var(--border);
+    }
+
+    /* Thinking ticker — shown at bottom of conversation while task is non-terminal. */
+    .thinking {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 12px; padding: 10px 14px;
+      background: #0d1117; border: 1px solid #2d333b; border-radius: 6px;
+      font-family: var(--mono); font-size: 12px; color: #8b949e;
+    }
+    /* Closure message — shown above the activity filter bar when the task reaches a terminal state. */
+    .closure {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 12px; margin-bottom: 12px; padding: 12px 14px;
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 13px;
+    }
+    .closure.success {
+      background: var(--green-soft); border: 1px solid var(--green); color: var(--green);
+    }
+    .closure.failure {
+      background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err);
+    }
+    .closure.warning {
+      background: #2d2010; border: 1px solid #d4a72c; color: #d4a72c;
+    }
+    .closure .closure-icon { font-size: 16px; }
+    .closure .closure-text { line-height: 1.4; }
+    .thinking .spinner {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #58a6ff;
+      animation: thinking-pulse 1.2s ease-in-out infinite;
+    }
+    .thinking #thinking-text { color: #c9d1d9; }
+    .thinking #thinking-text::after {
+      content: ""; display: inline-block; width: 0;
+      animation: thinking-dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes thinking-pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50%      { opacity: 1;    transform: scale(1.15); }
+    }
+    @keyframes thinking-dots {
+      0%   { content: ""; }
+      25%  { content: "."; }
+      50%  { content: ".."; }
+      75%  { content: "..."; }
+      100% { content: ""; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script id="project-osmos-state-script" src="state.js"></script>
+  <script>
+    window.__STATE = window.__STATE || {
+      schema_version: 1,
+      task: {
+        id: "starter-preview",
+        workspace_id: "00000000-0000-0000-0000-000000000000",
+        workspace_name: "Sample workspace",
+        lakehouse_id: "11111111-1111-1111-1111-111111111111",
+        lakehouse_name: "Sample lakehouse",
+        created_at: "2026-01-01T09:00:00.000Z",
+        started_at: "2026-01-01T09:01:00.000Z",
+        last_polled_at: null,
+        status: "Created",
+        status_detail: "Starter preview data",
+        operation_id: null,
+        session_id: null,
+        capacity_id: null
+      },
+      intake: {
+        project_type: "Exploration",
+        classification_confidence: "high",
+        answers: [
+          {
+            id: "Question 1",
+            question: "What should Project Osmos help with?",
+            answer: "profile-source-data",
+            recommended: true,
+            scope: "Inspect a source table and summarize quality findings before making changes."
+          },
+          {
+            id: "Question 2",
+            question: "How should outputs be handled?",
+            answer: "notebook-and-summary",
+            recommended: true,
+            scope: "Draft a notebook and report proposed artifacts without publishing anything automatically."
+          },
+          {
+            id: "Question 3",
+            question: "What safety posture should the run use?",
+            answer: "read-only-first",
+            recommended: false,
+            scope: "Keep writes disabled until the user confirms the proposed plan."
+          }
+        ],
+        user_outcome: "Create a starter data-quality exploration for a Fabric lakehouse table and explain the recommended next steps."
+      },
+      spec: "## Operational constraints\n\n- Treat this as preview data until a real state.js file is written.\n- Start read-only: inspect schemas, row counts, nulls, and duplicate keys before proposing writes.\n- Surface notebook and table artifacts only after they are actually created.",
+      summary: "Preview a Project Osmos lakehouse data-quality exploration with sample intake, activity, and artifact placeholders.",
+      messages: [
+        {
+          seq: 0,
+          id: "starter-user-0",
+          ts: "2026-01-01T09:01:00.000Z",
+          role: "user",
+          text: "Please explore the sample lakehouse table and recommend a safe quality-improvement plan.",
+          author: { name: "Starter data", source: "dashboard.html" }
+        },
+        {
+          seq: 1,
+          id: "starter-assistant-1",
+          ts: "2026-01-01T09:02:00.000Z",
+          role: "assistant",
+          text: "I will inspect the source schema, profile key columns, and prepare a read-only notebook plan before suggesting any writes."
+        },
+        {
+          seq: 2,
+          id: "starter-assistant-2",
+          ts: "2026-01-01T09:03:00.000Z",
+          role: "assistant",
+          text: "Starter preview: real task updates will replace this feed when state.js is generated next to dashboard.html."
+        }
+      ],
+      artifacts: {
+        notebook: null,
+        table: null
+      },
+      recovery: {
+        auth_status: null,
+        auto_retries_total: 0,
+        auto_retries_max: 10,
+        auto_retries_exhausted: false,
+        last_retry_at: null,
+        last_retried_signature: null,
+        last_progress_at: null,
+        last_successful_poll_at: null,
+        no_progress_window_seconds: 7200,
+        last_auth_error_at: null,
+        auth_broken_started_at: null,
+        auth_blind_seconds_accumulated: 0,
+        token_refreshed_at: null,
+        token_refresh_count: 0,
+        token_refresh_configured: false,
+        last_trigger_error: null,
+        last_trigger_error_at: null,
+        last_trigger_error_signature: null,
+        pending_retry_signature: null,
+        last_retry_message_seq: null
+      },
+      starter_preview: true
+    };
+  </script>
+  <script>
+    (function () {
+      "use strict";
+
+      var SUPPORTED_SCHEMA = 1;
+      var REFRESH_INTERVAL_MS = 10000;
+      var SS_KEY = "project-osmos.dataproject.ui";
+      var LS_RETRY_DISMISS_PREFIX = "project-osmos.dataproject.dismissed-retry-trigger";
+      var memoryDismissedRetryTriggers = {};
+
+      function loadUI() {
+        try {
+          var raw = sessionStorage.getItem(SS_KEY);
+          if (!raw) return null;
+          return JSON.parse(raw);
+        } catch (e) { return null; }
+      }
+      function saveUI() {
+        try {
+          sessionStorage.setItem(SS_KEY, JSON.stringify({
+            activeTab: activeTab,
+            paused: paused,
+            didAutoSwitchToTerminal: didAutoSwitchToTerminal,
+            roleFilter: roleFilter,
+            collapsed: collapsed,
+            feedOrder: feedOrder,
+            renderMd: renderMd
+          }));
+        } catch (e) { /* sessionStorage may be disabled; ignore */ }
+      }
+
+      var __saved = loadUI() || {};
+      var paused = !!__saved.paused;
+      var activeTab = __saved.activeTab || "conversation";
+      var didAutoSwitchToTerminal = !!__saved.didAutoSwitchToTerminal;
+      var roleFilter = __saved.roleFilter || { assistant: true, user: true };
+      var collapsed = __saved.collapsed || {};
+      var feedOrder = __saved.feedOrder || "newest";
+      var renderMd = __saved.renderMd != null ? !!__saved.renderMd : true;
+
+      function localGet(key) {
+        try { return localStorage.getItem(key); } catch (e) { return null; }
+      }
+      function localSet(key, value) {
+        try { localStorage.setItem(key, value); } catch (e) { /* localStorage may be disabled; ignore */ }
+      }
+
+      function escHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+
+      function renderMarkdown(src) {
+        if (!src) return "";
+        var codeBlocks = [];
+        src = src.replace(/```([a-z0-9_-]*)\n([\s\S]*?)```/g, function (_m, _lang, code) {
+          codeBlocks.push('<pre class="md-code"><code>' + escHtml(code) + '</code></pre>');
+          return "\u0000CB" + (codeBlocks.length - 1) + "\u0000";
+        });
+        src = escHtml(src);
+
+        // Rescue: when a line starts with "- " and contains additional " - "
+        // separators (a flattened bullet list), split it back into one bullet
+        // per line so the block parser below can render it as a real <ul>.
+        src = src.split("\n").map(function (line) {
+          if (/^\s*[-*]\s/.test(line) && /\s-\s/.test(line)) {
+            return line.replace(/\s+-\s+/g, "\n- ");
+          }
+          return line;
+        }).join("\n");
+
+        // Inline transforms (applied later per-line so headings/lists work cleanly)
+        function inline(s) {
+          s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+          s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+          s = s.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+          s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+          return s;
+        }
+
+        // Line-by-line block parser: groups consecutive bullet lines into a <ul>,
+        // numbered lines into <ol>, blockquote lines into <blockquote>, and prose
+        // (consecutive non-blank, non-list lines) into a <p>. Blank lines flush.
+        var lines = src.split("\n");
+        var out = [];
+        var buf = [];
+        var bufType = null; // "p" | "ul" | "ol" | "bq"
+
+        function flush() {
+          if (!buf.length) { bufType = null; return; }
+          if (bufType === "ul") {
+            out.push("<ul>" + buf.map(function (l) {
+              var indent = l.match(/^(\s*)/)[1].length;
+              var content = inline(l.replace(/^\s*[-*]\s+/, ""));
+              return '<li class="indent-' + Math.min(4, Math.floor(indent / 2)) + '">' + content + "</li>";
+            }).join("") + "</ul>");
+          } else if (bufType === "ol") {
+            out.push("<ol>" + buf.map(function (l) {
+              return "<li>" + inline(l.replace(/^\s*\d+\.\s+/, "")) + "</li>";
+            }).join("") + "</ol>");
+          } else if (bufType === "bq") {
+            out.push("<blockquote>" + buf.map(function (l) {
+              return inline(l.replace(/^\s*&gt;\s?/, ""));
+            }).join("<br>") + "</blockquote>");
+          } else if (bufType === "p") {
+            out.push("<p>" + buf.map(inline).join("<br>") + "</p>");
+          }
+          buf = [];
+          bufType = null;
+        }
+
+        for (var i = 0; i < lines.length; i++) {
+          var raw = lines[i];
+          var line = raw.replace(/\s+$/, "");
+          if (!line.trim()) { flush(); continue; }
+
+          // Code-block placeholder line
+          if (/^\u0000CB\d+\u0000$/.test(line.trim())) {
+            flush();
+            out.push(line.trim());
+            continue;
+          }
+          // Heading
+          var hm = /^(#{1,6})\s+(.+)$/.exec(line);
+          if (hm) {
+            flush();
+            var n = hm[1].length;
+            out.push("<h" + n + ">" + inline(hm[2]) + "</h" + n + ">");
+            continue;
+          }
+          // Bullet list item
+          if (/^\s*[-*]\s+/.test(line)) {
+            if (bufType !== "ul") { flush(); bufType = "ul"; }
+            buf.push(line);
+            continue;
+          }
+          // Numbered list item
+          if (/^\s*\d+\.\s+/.test(line)) {
+            if (bufType !== "ol") { flush(); bufType = "ol"; }
+            buf.push(line);
+            continue;
+          }
+          // Blockquote (escaped to &gt; by escHtml)
+          if (/^\s*&gt;/.test(line)) {
+            if (bufType !== "bq") { flush(); bufType = "bq"; }
+            buf.push(line);
+            continue;
+          }
+          // Continuation of previous list item (indented prose)
+          if ((bufType === "ul" || bufType === "ol") && /^\s+\S/.test(raw)) {
+            buf[buf.length - 1] += " " + line.trim();
+            continue;
+          }
+          // Plain prose paragraph
+          if (bufType !== "p") { flush(); bufType = "p"; }
+          buf.push(line);
+        }
+        flush();
+
+        var html = out.join("\n");
+        html = html.replace(/\u0000CB(\d+)\u0000/g, function (_m, i) { return codeBlocks[+i]; });
+        return html;
+      }
+
+      function mdToggleBtn() {
+        function seg(label, value, icon) {
+          var active = (value === "rendered") === renderMd;
+          return el("button", {
+            class: "md-seg" + (active ? " active" : ""),
+            "aria-pressed": active ? "true" : "false",
+            onclick: function (e) {
+              e.stopPropagation();
+              var want = (value === "rendered");
+              if (renderMd !== want) { renderMd = want; rerender(); }
+            }
+          }, [icon + " " + label]);
+        }
+        return el("div", { class: "md-toggle-group", role: "group", "aria-label": "Markdown view" }, [
+          seg("Raw", "raw", "📄"),
+          seg("Rendered", "rendered", "📝")
+        ]);
+      }
+
+      function mdNode(text) {
+        var s = text || "";
+        if (!renderMd) return el("pre", null, [s || "—"]);
+        var d = document.createElement("div");
+        d.className = "md";
+        d.innerHTML = renderMarkdown(s);
+        return d;
+      }
+
+      function card(id, title, bodyChildren) {
+        var isCol = !!collapsed[id];
+        var twist = el("span", { class: "twist" }, ["▾"]);
+        var h2 = el("h2", {
+          tabindex: "0",
+          role: "button",
+          "aria-expanded": isCol ? "false" : "true",
+          onclick: function () { collapsed[id] = !collapsed[id]; rerender(); },
+          onkeydown: function (e) {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              collapsed[id] = !collapsed[id];
+              rerender();
+            }
+          }
+        }, [twist, title]);
+        var body = el("div", { class: "card-body" }, bodyChildren || []);
+        return el("section", { class: "card" + (isCol ? " collapsed" : "") }, [h2, body]);
+      }
+
+      function $(id) { return document.getElementById(id); }
+      function el(tag, attrs, children) {
+        var node = document.createElement(tag);
+        if (attrs) {
+          for (var k in attrs) {
+            if (k === "class") node.className = attrs[k];
+            else if (k === "html") node.innerHTML = attrs[k];
+            else if (k.indexOf("on") === 0) node.addEventListener(k.slice(2), attrs[k]);
+            else node.setAttribute(k, attrs[k]);
+          }
+        }
+        (children || []).forEach(function (c) {
+          if (c == null) return;
+          if (typeof c === "string" || typeof c === "number" || typeof c === "boolean") {
+            node.appendChild(document.createTextNode(String(c)));
+          } else if (c instanceof Node) {
+            node.appendChild(c);
+          } else {
+            // Defensive: log and stringify rather than crash the whole render.
+            try { console.warn("el(): non-Node child coerced to text", c); } catch (_) {}
+            node.appendChild(document.createTextNode(String(c)));
+          }
+        });
+        return node;
+      }
+
+      function fmtTs(s) {
+        if (!s) return "";
+        try { return new Date(s).toLocaleString(); } catch (e) { return s; }
+      }
+
+      function isTerminal(status) {
+        var s = statusLabel(status);
+        return s === "Completed" || s === "Failed" || s === "Cancelled" || s === "Canceled";
+      }
+
+      var STATUS_BY_CODE = {
+        0: "Created",
+        1: "Running",
+        2: "Cancelling",
+        3: "Cancelled",
+        4: "Completed",
+        5: "Failed"
+      };
+
+      // The poller normally normalizes task.status before writing state.js, but
+      // seeded/older snapshots can still contain numeric or stringified-numeric
+      // deployed-ring values. Keep this defensive mirror of poller status_label().
+      function statusLabel(s) {
+        if (s == null) return "Created";
+        if (typeof s === "number" && isFinite(s)) return STATUS_BY_CODE[s] || ("Status " + s);
+        if (typeof s === "string") {
+          var trimmed = s.trim();
+          if (!trimmed) return "Created";
+          if (/^\d+$/.test(trimmed)) return STATUS_BY_CODE[Number(trimmed)] || ("Status " + trimmed);
+          return trimmed;
+        }
+        return String(s);
+      }
+
+      // Authoritative status for a task. Preserve explicit terminal statuses
+      // before deriving success from completedAt, because some rings report
+      // Cancelled/Failed with completedAt but without error details.
+      function taskStatus(task) {
+        if (!task) return "Created";
+        var completed = task.completed_at || task.completedAt;
+        var err = task.status_detail || task.error_message || task.errorMessage;
+        var explicit = statusLabel(task.status);
+        if (["Cancelled", "Canceled", "Failed"].indexOf(explicit) !== -1) return explicit;
+        if (completed && err) return "Failed";
+        if (completed && !err) return "Completed";
+        return explicit;
+      }
+
+      var THINKING_PHRASES = [
+        "thinking", "planning", "implementing", "assessing",
+        "drafting notebook", "polling orchestrator", "contemplating the medallion",
+        "negotiating with Fabric", "checking schema", "stirring the bronze",
+        "asking the agent nicely", "reading lakehouse", "minding the deltas",
+        "reconciling counts", "consulting the spec", "inspecting tables",
+        "reviewing partitions", "lining up joins", "tallying nulls",
+        "warming the cluster", "tracing lineage", "double-checking types",
+        "weighing the merge", "auditing rows", "verifying writes",
+        "smoothing the schema", "validating output", "tidying the bronze",
+        "promoting to silver", "polishing the gold"
+      ];
+      var __tickerIdx = Math.floor(Math.random() * THINKING_PHRASES.length);
+      var __tickerTimer = null;
+      function startTicker() {
+        if (__tickerTimer) return;
+        __tickerTimer = setInterval(function () {
+          var node = document.getElementById("thinking-text");
+          if (!node) return;
+          __tickerIdx = (__tickerIdx + 1) % THINKING_PHRASES.length;
+          node.textContent = THINKING_PHRASES[__tickerIdx];
+        }, 1800);
+      }
+      function thinkingNode() {
+        return el("div", { class: "thinking" }, [
+          el("span", { class: "spinner" }),
+          el("span", { id: "thinking-text" }, [THINKING_PHRASES[__tickerIdx]])
+        ]);
+      }
+
+      function closureNode(state) {
+        var terminal = state.terminal || {};
+        var taskStatus = statusLabel(terminal.status);
+        var exitCode = Number(terminal.exit_code || 0);
+        var succeeded = exitCode === 0
+          && terminal.reason === "terminal_status"
+          && taskStatus === "Completed";
+
+        var icon, text, cls;
+        if (succeeded) {
+          icon = "✓";
+          text = "Task succeeded.";
+          var retries = terminal.auto_retries_total;
+          if (retries) text += " (" + retries + " auto-" + (retries === 1 ? "retry" : "retries") + " along the way)";
+          cls = "success";
+        } else {
+          icon = "✕";
+          var reason = terminal.reason || "unknown";
+          if (taskStatus === "Cancelled" || taskStatus === "Canceled") {
+            icon = "⊘";
+            text = "Task was cancelled.";
+            cls = "warning";
+          } else if (reason === "max_auto_retries") {
+            text = "Task stopped — auto-retry budget exhausted after " + (terminal.auto_retries_total || "multiple") + " attempts.";
+            cls = "failure";
+          } else if (reason === "no_progress_window") {
+            text = "Task stopped — no progress detected within the configured window.";
+            cls = "failure";
+          } else if (reason === "signal") {
+            icon = "⊘";
+            text = "Poller stopped — received SIGTERM/SIGINT. Ask the agent to resume polling.";
+            cls = "warning";
+          } else if (reason === "max_runtime") {
+            icon = "⊘";
+            text = "Poller stopped — max runtime exceeded. Ask the agent to resume polling if the task is still running.";
+            cls = "warning";
+          } else if (terminal.last_error_message) {
+            text = "Task failed: " + String(terminal.last_error_message).slice(0, 200);
+            cls = "failure";
+          } else {
+            text = "Poller stopped: " + reasonExplanation(reason);
+            cls = "failure";
+          }
+        }
+
+        var textChildren = [text];
+        if (!succeeded && terminal.last_error_message) {
+          textChildren.push(el("div", { style: "margin-top: 4px; font-size: 12px; opacity: 0.85;" }, [
+            "Last error: ", el("code", null, [String(terminal.last_error_message).slice(0, 240)])
+          ]));
+        }
+
+        return el("div", { class: "closure " + cls }, [
+          el("span", { class: "closure-icon" }, [icon]),
+          el("span", { class: "closure-text" }, textChildren)
+        ]);
+      }
+
+      function copy(text) {
+        navigator.clipboard.writeText(text).catch(function () {});
+      }
+
+      function renderTopbar(state) {
+        var task = state.task || {};
+        var recovery = state.recovery || {};
+        var controls = [
+          el("span", { class: "last-poll" }, ["Last polled: " + (fmtTs(task.last_polled_at) || "(never)")])
+        ];
+
+        // Auth status pill — always visible. Green only after the poller has
+        // explicitly reported auth_status="ok"; seeded/unpolled state remains
+        // neutral instead of implying auth is healthy.
+        var authBroken = recovery.auth_status === "broken";
+        var authOk = recovery.auth_status === "ok";
+        var authCls = authBroken ? "auth-bad" : (authOk ? "ok" : "neutral");
+        var authLabel = authBroken ? "🔒 Auth broken" : (authOk ? "🔒 Auth ok" : "🔒 Auth unknown");
+        controls.push(el("span", {
+          class: "recovery-pill " + authCls,
+          title: authBroken
+            ? (recovery.token_refresh_configured
+              ? "Token refresh failed; the poller is retrying refresh and not advancing last_polled_at until it succeeds."
+              : "The token is rejected and automatic refresh is not configured. Re-spawn with a readable initial token via --token-file or PROJECT_OSMOS_TOKEN; add --token-refresh-cmd only for later expiry.")
+            : (!authOk
+              ? "The poller has not reported token health yet."
+              : recovery.token_refresh_configured
+              ? "Token refresh is healthy. The poller is proactively refreshing on schedule."
+              : "The token is currently accepted. Automatic refresh is not configured for this poller run.")
+        }, [authLabel]));
+
+        // Auto-retry pill — always visible. Green at 0, blue while retrying, red when exhausted.
+        var retries = Number(recovery.auto_retries_total || 0);
+        var cap = Number(recovery.auto_retries_max || 0);
+        var exhausted = !!recovery.auto_retries_exhausted;
+        var retryCls = exhausted ? "exhausted" : (retries > 0 ? "retry" : "ok");
+        var retryLabel = "↻ Auto-retry " + retries + (cap ? "/" + cap : "");
+        controls.push(el("span", {
+          class: "recovery-pill " + retryCls,
+          title: retries > 0
+            ? "The poller has auto-retried the documented Spark statement transient. Last retried at " + (fmtTs(recovery.last_retry_at) || "—") + "."
+            : "The poller has not needed to auto-retry. Spark statement transients (if any) will retry up to " + (cap || 10) + " times."
+        }, [retryLabel]));
+
+        // Token-refresh pill — green only when a refresh recipe is configured;
+        // neutral when refresh is unavailable for this poller run.
+        var tokRef = Number(recovery.token_refresh_count || 0);
+        var refreshConfigured = !!recovery.token_refresh_configured;
+        controls.push(el("span", {
+          class: "recovery-pill " + (refreshConfigured ? "ok" : "neutral"),
+          title: tokRef > 0
+            ? "Token refreshed " + tokRef + (tokRef === 1 ? " time" : " times") + ". Last refresh at " + (fmtTs(recovery.token_refreshed_at) || "—") + "."
+            : (refreshConfigured
+              ? "Token has not yet been refreshed. Refresh runs on the configured proactive schedule."
+              : "Token refresh is not configured for this poller run; later expiry will require respawn with a fresh initial token.")
+        }, ["🔄 Token refreshed " + tokRef + "×"]));
+
+        controls.push(el("button", {
+          title: "Toggle Markdown rendering for outcome, spec, and message text",
+          onclick: function () { renderMd = !renderMd; rerender(); }
+        }, [renderMd ? "📝 Markdown: on" : "📝 Markdown: off"]));
+        controls.push(el("button", { onclick: function () { paused = !paused; rerender(); } }, [paused ? "▶ Resume" : "⏸ Pause"]));
+        controls.push(el("button", { onclick: function () { location.reload(); } }, ["⟳ Refresh"]));
+        return el("div", { class: "topbar" }, [
+          el("span", { class: "crumb" }, [task.workspace_name || "Workspace"]),
+          el("span", { class: "crumb-sep" }, ["›"]),
+          el("span", { class: "crumb" }, [task.lakehouse_name || "Lakehouse"]),
+          el("span", { class: "crumb-sep" }, ["›"]),
+          el("span", { class: "crumb crumb-active" }, ["Project Osmos"]),
+          el("div", { class: "spacer" }),
+          el("div", { class: "controls" }, controls)
+        ]);
+      }
+
+      function projectSummary(state) {
+        if (state.summary) return String(state.summary).trim();
+        // No fallback regex extraction — it produces sentence-fragment garbage
+        // from real user instructions. The skill is responsible for writing a
+        // clean, agent-authored one-line summary into state.summary at seed time.
+        // If it's missing, show a neutral label derived from intake.project_type
+        // rather than risk rendering nonsense.
+        var pt = state.intake && state.intake.project_type;
+        if (pt) {
+          var label = String(pt).replace(/[-_]/g, " ");
+          label = label.charAt(0).toUpperCase() + label.slice(1) + " task";
+          return label;
+        }
+        return "";
+      }
+
+      function renderPageHead(state) {
+        var task = state.task || {};
+        var status = taskStatus(task);
+        var summary = projectSummary(state);
+        var children = [
+          el("h1", null, [
+            "Project Osmos",
+            el("span", { class: "status-pill status-" + status }, [
+              el("span", { class: "dot" }, []),
+              status
+            ])
+          ]),
+          el("div", { class: "sub" }, [(task.id || "(no id)") + "  ·  " + (task.environment || "—")])
+        ];
+        if (summary) children.push(el("div", { class: "summary" }, [summary]));
+        return el("div", { class: "page-head" }, children);
+      }
+
+      function renderTabs(state) {
+        var msgCount = ((state.messages || []).length) || 0;
+        var artifacts = state.artifacts || {};
+        var artCount = ["notebook", "table"].filter(function (k) { return artifacts[k]; }).length;
+        var defs = [
+          { id: "conversation", label: "Intake",    badge: null },
+          { id: "spec",         label: "Spec",      badge: state.spec ? null : "·" },
+          { id: "updates",      label: "Activity",  badge: msgCount ? String(msgCount) : null }
+        ];
+        if (artCount) {
+          defs.push({ id: "artifacts", label: "Artifacts", badge: String(artCount) });
+        }
+        // Normalize activeTab if it references a tab that isn't rendered.
+        var validIds = defs.map(function (d) { return d.id; });
+        if (validIds.indexOf(activeTab) === -1) activeTab = "updates";
+        return el("nav", { class: "tabs" }, defs.map(function (d) {
+          var children = [d.label];
+          if (d.badge) children.push(el("span", { class: "badge" }, [d.badge]));
+          return el("button", {
+            class: activeTab === d.id ? "active" : "",
+            onclick: function () { activeTab = d.id; rerender(); }
+          }, children);
+        }));
+      }
+
+      function renderConversation(state) {
+        var task = state.task || {};
+        var intake = state.intake || {};
+        var taskCard = card("task", "Task", [
+          el("dl", { class: "kv" }, [
+            el("dt", null, ["Environment"]), el("dd", null, [task.environment || "—"]),
+            el("dt", null, ["Workspace"]), el("dd", null, [
+              (task.workspace_name || "—") + " ",
+              el("span", { class: "id" }, ["(" + (task.workspace_id || "—") + ")"])
+            ]),
+            el("dt", null, ["Spark session lakehouse"]), el("dd", null, [
+              (task.lakehouse_name || "—") + " ",
+              el("span", { class: "id" }, ["(" + (task.lakehouse_id || "—") + ")"])
+            ]),
+            el("dt", null, ["Created"]), el("dd", null, [fmtTs(task.created_at) || "—"]),
+            el("dt", null, ["Started"]), el("dd", null, [fmtTs(task.started_at) || "—"])
+          ])
+        ]);
+
+        var classCard = card("project-type", "Task type", [
+          el("div", { class: "card-title" }, [intake.project_type || "—"]),
+          intake.classification_confidence
+            ? el("div", { style: "font-size:12px; color:#7d8590;" }, [intake.classification_confidence + " confidence"])
+            : null
+        ]);
+
+        var answers = (intake.answers || []).map(function (a) {
+          var rawId = a.id || "";
+          var displayId = rawId.replace(/^Q(\d)/i, "Question $1");
+          return el("div", { class: "qa" + (a.recommended ? " recommended" : "") }, [
+            el("div", { class: "q" }, [
+              el("span", { class: "q-id" }, [displayId]),
+              a.question || ""
+            ]),
+            el("div", { class: "a" }, [
+              el("span", { class: "key" }, [a.answer || ""]),
+              a.recommended ? el("span", { class: "rec-tag" }, ["✓ recommended"]) : null
+            ]),
+            a.scope ? el("div", { class: "scope" }, ["Scope: " + a.scope]) : null
+          ]);
+        });
+        var qaCard = card("intake", "Operational intake answers", [
+          answers.length ? el("div", null, answers) : el("div", { class: "empty" }, ["No intake recorded yet."])
+        ]);
+
+        var outcomeCard = card("outcome", "User outcome", [
+          mdToggleBtn(),
+          mdNode(intake.user_outcome)
+        ]);
+
+        return el("div", { class: "panel active" }, [taskCard, classCard, qaCard, outcomeCard]);
+      }
+
+      function renderSpec(state) {
+        var spec = state.spec || "";
+        var specCard = card("spec", "Instruction sent to orchestrator (intake preamble + your request)", [
+          el("div", { class: "card-toolbar" }, [
+            mdToggleBtn(),
+            el("button", { class: "copy-btn", onclick: function (e) { e.stopPropagation(); copy(spec); } }, ["Copy spec"])
+          ]),
+          spec ? mdNode(spec) : el("div", { class: "empty" }, ["No spec rendered yet."])
+        ]);
+        return el("div", { class: "panel active" }, [specCard]);
+      }
+
+      function renderUpdates(state) {
+        var sorted = (state.messages || []).slice().sort(function (a, b) {
+          var d = (a.seq || 0) - (b.seq || 0);
+          return feedOrder === "newest" ? -d : d;
+        });
+        var filtered = sorted.filter(function (m) { return roleFilter[m.role || "assistant"]; });
+
+        var ROLE_HELP = {
+          assistant: "Project Osmos narration — what it's thinking and doing.",
+          user:      "Messages the skill posted on your behalf — your instruction and follow-ups."
+        };
+        var ROLE_LABEL = { assistant: "Project Osmos", user: "user" };
+        var roleLabels = ["assistant", "user"].map(function (r) {
+          var cb = el("input", { type: "checkbox" });
+          cb.checked = !!roleFilter[r];
+          cb.addEventListener("change", function () { roleFilter[r] = cb.checked; rerender(); });
+          return el("label", { title: ROLE_HELP[r] }, [cb, " " + ROLE_LABEL[r]]);
+        });
+
+        var orderSel = el("select", {
+          "aria-label": "Feed order",
+          onchange: function (e) { feedOrder = e.target.value; rerender(); }
+        }, [
+          (function () { var o = el("option", { value: "newest" }, ["Newest first"]); if (feedOrder === "newest") o.selected = true; return o; })(),
+          (function () { var o = el("option", { value: "oldest" }, ["Oldest first"]); if (feedOrder === "oldest") o.selected = true; return o; })()
+        ]);
+        var orderWrap = el("label", { class: "order" }, [
+          "Order:",
+          orderSel
+        ]);
+
+        var filters = el("div", { class: "filters" }, roleLabels.concat([orderWrap]));
+
+        var feedItems = filtered.length ? filtered.map(function (m) {
+          var repeats = m.repeats && m.repeats > 1 ? m.repeats : 0;
+          var metaChildren = [
+            el("span", { class: "seq" }, ["#" + (m.seq != null ? m.seq : "?")]),
+            el("span", { class: "role-badge" }, [ROLE_LABEL[m.role] || m.role || "assistant"]),
+            el("span", null, [fmtTs(m.ts)])
+          ];
+          if (m.author && m.author.name) {
+            var authorTitle = m.author.source ? (m.author.name + " · " + m.author.source) : m.author.name;
+            metaChildren.push(el("span", { class: "author", title: authorTitle }, ["👤 " + m.author.name]));
+          }
+          if (repeats) {
+            var lastSeen = m.last_seen_ts ? fmtTs(m.last_seen_ts) : "";
+            metaChildren.push(el("span", {
+              class: "repeats",
+              title: lastSeen ? ("Repeated " + repeats + "× — last seen " + lastSeen) : ("Repeated " + repeats + "×")
+            }, ["× " + repeats]));
+            if (lastSeen) {
+              metaChildren.push(el("span", { class: "last-seen" }, ["last seen " + lastSeen]));
+            }
+          }
+          return el("div", { class: "msg role-" + (m.role || "assistant") + (repeats ? " repeated" : "") }, [
+            el("div", { class: "meta" }, metaChildren),
+            (function () {
+              var t = m.text || "";
+              if (renderMd) {
+                var d = document.createElement("div");
+                d.className = "text md";
+                d.innerHTML = renderMarkdown(t);
+                return d;
+              }
+              return el("div", { class: "text" }, [t]);
+            })()
+          ]);
+        }) : [el("div", { class: "empty" }, ["No messages yet. The orchestrator hasn't said anything."])];
+
+        var taskStatusStr = taskStatus(state.task);
+        var showTicker = !!state.task && !(state.terminal && state.terminal.reason) && !isTerminal(taskStatusStr);
+        var showClosure = !showTicker && state.terminal && state.terminal.reason;
+        var panelChildren = [];
+        if (showClosure) panelChildren.push(closureNode(state));
+        panelChildren.push(filters);
+        var feedChildren = [];
+        if (showTicker && feedOrder === "newest") feedChildren.push(thinkingNode());
+        feedChildren = feedChildren.concat(feedItems);
+        if (showTicker && feedOrder === "oldest") feedChildren.push(thinkingNode());
+        panelChildren.push(el("div", { class: "feed" }, feedChildren));
+
+        return el("div", { class: "panel active" }, panelChildren);
+      }
+
+      function renderArtifacts(state) {
+        var a = state.artifacts || {};
+        var labels = { notebook: "Notebook", table: "Table" };
+        var produced = ["notebook", "table"]
+          .filter(function (k) { return a[k]; })
+          .map(function (k) {
+            var item = a[k];
+            var path = item.workspace_path || item.lakehouse_path || "—";
+            var url = item.url;
+            return el("div", { class: "qa recommended" }, [
+              el("div", { class: "q" }, [labels[k]]),
+              el("div", { class: "a" }, [
+                url
+                  ? el("a", { href: url, target: "_blank", rel: "noopener" }, [path])
+                  : el("span", { class: "key" }, [path])
+              ])
+            ]);
+          });
+
+        var body = produced.length
+          ? produced
+          : [el("div", { class: "empty" }, ["No artifacts produced yet. Items appear here as the orchestrator confirms each publish."])];
+
+        return el("div", { class: "panel active" }, [card("artifacts", "Artifacts", body)]);
+      }
+
+      // Human-readable explanation for each poller exit reason recorded
+      // in state.terminal.reason. Keep in sync with dashboard-poller.py
+      // exit_reason strings.
+      var TERMINAL_REASONS = {
+        "terminal_status":         "The task reached a terminal status — see the activity stream for details.",
+        "max_runtime":             "Wall-clock --max-runtime exceeded; the poller exited. The task itself may still be running on the server.",
+        "max_auto_retries":        "Auto-retry budget exhausted. The same transient kept recurring after the configured number of retries.",
+        "no_progress_window":      "No new orchestrator messages within the no-progress window; the poller exited so a human can investigate.",
+        "retry_signature_repeat":  "The same error signature returned after auto-retry. Likely not a transient — needs investigation.",
+        "no_token_at_startup":     "The poller could not read an initial token at startup. Re-spawn with a readable --token-file or set MWC_TOKEN; add --token-refresh-cmd only for later expiry.",
+        "crash":                   "The poller crashed. See poller.log for the traceback.",
+        "signal":                  "The poller received SIGTERM / SIGINT and shut down cleanly. Re-spawn to keep monitoring the task.",
+        "unknown":                 "The poller exited without recording a reason. See poller.log for context."
+      };
+
+      function reasonExplanation(reason) {
+        if (!reason) return "";
+        if (TERMINAL_REASONS[reason]) return TERMINAL_REASONS[reason];
+        if (reason.indexOf("run_post_failed_") === 0) {
+          return "Auto-retry POST /run failed with HTTP " + reason.replace("run_post_failed_", "") + ".";
+        }
+        return reason;
+      }
+
+      function staleMinutes(task) {
+        // Returns minutes since last poll, or null if never polled / unparseable.
+        if (!task || !task.last_polled_at) return null;
+        var t = Date.parse(task.last_polled_at);
+        if (isNaN(t)) return null;
+        var mins = (Date.now() - t) / 60000;
+        return mins >= 0 ? mins : 0;
+      }
+
+      function renderBanner(state) {
+        var terminal = state.terminal;
+        var task = state.task || {};
+        var recovery = state.recovery || {};
+        var s = taskStatus(task);
+
+        // 1. Terminal (poller exited) — highest priority. Read from
+        // state.terminal which the daemon mirrors from terminal.json so
+        // file:// dashboards can see it without fetch().
+        if (terminal && terminal.reason) {
+          // Terminal state is shown via the closure node in the activity panel.
+          return null;
+        }
+
+        // 2. Auth broken — refresh failing, last_polled_at is intentionally frozen.
+        if (recovery.auth_status === "broken") {
+          var since = recovery.last_auth_error_at
+            ? " since " + (fmtTs(recovery.last_auth_error_at) || recovery.last_auth_error_at)
+            : "";
+          var authMsg = recovery.token_refresh_configured
+            ? "🔒 Token refresh failing" + since + ". The poller is retrying refresh on backoff. Last-polled is intentionally frozen until refresh succeeds — the task itself is unaffected."
+            : "🔒 Token rejected" + since + ". Automatic refresh is not configured for this poller run. Re-spawn with a readable --token-file or PROJECT_OSMOS_TOKEN; add --token-refresh-cmd only for later expiry.";
+          return el("div", { class: "banner auth-broken" }, [
+            authMsg
+          ]);
+        }
+
+        // 3. Stale poll — alive but quiet for > 5 minutes (a real signal the
+        // process may have wedged or the machine slept).
+        if (!isTerminal(s)) {
+          var mins = staleMinutes(task);
+          if (mins !== null && mins > 5) {
+            return el("div", { class: "banner stale" }, [
+              "⚠ Last poll was " + Math.floor(mins) + " min ago. If this keeps climbing the poller may be wedged or the machine slept — ask the agent to resume polling."
+            ]);
+          }
+        }
+
+        // 4. Auto-retrying — currently mid-recovery, informational only.
+        // Suppressed when the more detailed retry-trigger banner is also
+        // showing (renderRetryTriggerBanner) so we don't render two
+        // amber strips saying basically the same thing.
+        if (!isTerminal(s) && recovery.pending_retry_signature
+            && !shouldShowRetryTriggerBanner(state)) {
+          return el("div", { class: "banner retrying" }, [
+            "↻ Auto-retry in progress (" + recovery.auto_retries_total +
+            (recovery.auto_retries_max ? "/" + recovery.auto_retries_max : "") +
+            "). The poller hit the documented Spark statement transient and re-issued the run on the same task ID."
+          ]);
+        }
+
+        return null;
+      }
+
+      // Decision helper for the mid-run-error visibility banner. Pulled out
+      // so renderBanner() can suppress its generic "Auto-retry in progress"
+      // strip when this richer one will render. Guards against stale
+      // recovery fields (signature mismatch from a prior run, terminal
+      // already exited) so we never show the wrong error text.
+      function retryTriggerDismissKey(state) {
+        var rec = (state && state.recovery) || {};
+        if (!rec.last_trigger_error_signature) return "";
+        var taskId = (state.task && state.task.id) || rec.task_id || "unknown-task";
+        return LS_RETRY_DISMISS_PREFIX + ":" + taskId + ":" + rec.last_trigger_error_signature;
+      }
+
+      function isRetryTriggerDismissed(state) {
+        var key = retryTriggerDismissKey(state);
+        return key ? (localGet(key) === "1" || memoryDismissedRetryTriggers[key] === "1") : false;
+      }
+
+      function dismissRetryTriggerBanner(state) {
+        var key = retryTriggerDismissKey(state);
+        if (!key) return;
+        memoryDismissedRetryTriggers[key] = "1";
+        localSet(key, "1");
+        rerender();
+      }
+
+      function shouldShowRetryTriggerBanner(state) {
+        if (!state) return false;
+        if (state.terminal && state.terminal.reason) return false;
+        var rec = state.recovery || {};
+        if (!rec.last_trigger_error) return false;
+        // Signature match guard: the trigger error must belong to the
+        // most recent retry. Otherwise it's a leftover from a prior run
+        // that survived a partial state.json carryover.
+        if (rec.last_trigger_error_signature
+            && rec.last_retried_signature
+            && rec.last_trigger_error_signature !== rec.pending_retry_signature
+            && rec.last_trigger_error_signature !== rec.last_retried_signature) {
+          return false;
+        }
+        if (isRetryTriggerDismissed(state)) return false;
+        return true;
+      }
+
+      function renderRetryTriggerBanner(state) {
+        if (!shouldShowRetryTriggerBanner(state)) return null;
+        var rec = state.recovery || {};
+        var failedAt = fmtTs(rec.last_trigger_error_at) || rec.last_trigger_error_at || "";
+        var retryAt = fmtTs(rec.last_retry_at) || rec.last_retry_at || "";
+        var retries = Number(rec.auto_retries_total || 0);
+        var cap = Number(rec.auto_retries_max || 0);
+        var counter = retries + (cap ? "/" + cap : "");
+        // Use textContent (via the el() string-child path) for the error
+        // text so any HTML-shaped substring renders as literal text and
+        // can't escape into the DOM.
+        var header = retryAt ? "↻ Last retry triggered by an error" : "↻ Auto-retry pending after an error";
+        if (failedAt) header += " · failed " + failedAt;
+        if (retryAt) header += " · retry " + counter + " at " + retryAt;
+        var children = [
+          el("div", { style: "display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1;" }, [
+            el("div", { style: "font-weight: 600;" }, [header]),
+            el("div", { style: "margin-top: 4px; font-size: 12px; opacity: 0.9;" }, [
+              el("code", null, [String(rec.last_trigger_error)])
+            ])
+          ])
+        ];
+        if (retryTriggerDismissKey(state)) {
+          children.push(el("button", {
+            class: "dismiss-btn",
+            title: "Dismiss this retry-trigger banner for this task and error signature",
+            onclick: function (e) {
+              e.stopPropagation();
+              dismissRetryTriggerBanner(state);
+            }
+          }, ["Dismiss"]));
+        }
+        return el("div", { class: "banner retry-trigger" }, children);
+      }
+
+      function rerender() {
+        saveUI();
+        var app = $("app");
+        if (!app) return;
+        app.innerHTML = "";
+
+        var state = window.__STATE;
+        if (!state) {
+          app.appendChild(el("div", { class: "schema-mismatch" }, ["No state.js loaded yet. Re-run the Project Osmos task, or refresh once state.js is written."]));
+          return;
+        }
+        if (state.schema_version !== SUPPORTED_SCHEMA) {
+          app.appendChild(el("div", { class: "schema-mismatch" }, [
+            "Schema mismatch: dashboard supports v" + SUPPORTED_SCHEMA + ", state.js is v" + state.schema_version + ". Update the plugin or use an older dashboard."
+          ]));
+          return;
+        }
+
+        var chrome = el("div", { class: "sticky-chrome" }, [
+          renderTopbar(state),
+          renderPageHead(state),
+          renderTabs(state)
+        ]);
+        app.appendChild(chrome);
+
+        var main = el("main", null, []);
+        var banner = renderBanner(state);
+        if (banner) main.appendChild(banner);
+        // The retry-trigger banner is allowed to stack with the primary
+        // banner (e.g., auth-broken AND mid-recovery can be true at the
+        // same time — the user needs to see both contexts). Terminal
+        // suppresses it via shouldShowRetryTriggerBanner().
+        var retryBanner = renderRetryTriggerBanner(state);
+        if (retryBanner) main.appendChild(retryBanner);
+
+        // Auto-switch to Activity tab when terminal state is reached so
+        // the closure message is visible regardless of which tab was active.
+        // Only do this once so subsequent user tab clicks are respected.
+        if (state.terminal && state.terminal.reason && !didAutoSwitchToTerminal) {
+          activeTab = "updates";
+          didAutoSwitchToTerminal = true;
+          saveUI();
+        }
+
+        var panel;
+        switch (activeTab) {
+          case "spec":      panel = renderSpec(state); break;
+          case "updates":   panel = renderUpdates(state); break;
+          case "artifacts": panel = renderArtifacts(state); break;
+          default:          panel = renderConversation(state); break;
+        }
+        main.appendChild(panel);
+        app.appendChild(main);
+      }
+
+      function reloadState(cb) {
+        var old = document.getElementById("project-osmos-state-script");
+        if (old) old.parentNode.removeChild(old);
+        var s = document.createElement("script");
+        s.id = "project-osmos-state-script";
+        s.src = "state.js?_t=" + Date.now();
+        s.onload = function () { cb(true); };
+        s.onerror = function () { cb(false); };
+        document.head.appendChild(s);
+      }
+
+      function tick() {
+        if (paused) return;
+        // Stop polling once terminal state is already rendered in memory.
+        var cur = window.__STATE;
+        if (cur && cur.terminal && cur.terminal.reason) return;
+        reloadState(function (ok) {
+          if (!ok || !window.__STATE) { location.reload(); return; }
+          var state = window.__STATE;
+          // Stop auto-refresh only when the poller has exited (terminal.json
+          // mirrored). task.status can be transiently Failed during auto-retry
+          // before the poller rewrites it back to Running, so using task status
+          // here can freeze the dashboard on a recoverable failure.
+          if (state.terminal && state.terminal.reason) {
+            rerender();
+            return;
+          }
+          rerender();
+        });
+      }
+
+      rerender();
+      startTicker();
+      setInterval(tick, REFRESH_INTERVAL_MS);
+    })();
+  </script>
+</body>
+</html>

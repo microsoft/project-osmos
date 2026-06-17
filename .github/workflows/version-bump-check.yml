@@ -1,0 +1,71 @@
+name: Version bump check
+
+on:
+  pull_request:
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  version-bump:
+    name: Version bump check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "${BASE_SHA}:refs/remotes/origin/pr-base"
+
+      - name: Check marketplace version bump
+        id: version_bump
+        env:
+          BASE_REF: refs/remotes/origin/pr-base
+        run: python build/check_version_bump.py --base-ref "${BASE_REF}" --warning-only
+
+      - name: Publish neutral version bump warning
+        if: steps.version_bump.outputs.version_bumped == 'false'
+        uses: actions/github-script@v7
+        continue-on-error: true
+        env:
+          WARNING_MESSAGE: ${{ steps.version_bump.outputs.warning_message }}
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            const message = process.env.WARNING_MESSAGE;
+            const detailsUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Version bump warning',
+              head_sha: pull.head.sha,
+              details_url: detailsUrl,
+              status: 'completed',
+              conclusion: 'neutral',
+              output: {
+                title: 'Marketplace version not bumped',
+                summary: message,
+                annotations: [
+                  {
+                    path: '.github/plugin/marketplace.json',
+                    start_line: 1,
+                    end_line: 1,
+                    annotation_level: 'warning',
+                    title: 'Marketplace version not bumped',
+                    message,
+                  },
+                ],
+              },
+            });

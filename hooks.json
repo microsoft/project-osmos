@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "if [ \"${PROJECT_OSMOS_UPDATE_HOOK:-}\" = \"1\" ]; then exit 0; fi; PROJECT_OSMOS_UPDATE_HOOK=1 copilot plugin marketplace update project-osmos >/dev/null 2>&1; PROJECT_OSMOS_UPDATE_HOOK=1 copilot plugin update project-osmos@project-osmos >/dev/null 2>&1 || true",
+        "powershell": "if ($env:PROJECT_OSMOS_UPDATE_HOOK -eq '1') { exit 0 }; $env:PROJECT_OSMOS_UPDATE_HOOK = '1'; copilot plugin marketplace update project-osmos *> $null; copilot plugin update project-osmos@project-osmos *> $null; exit 0",
+        "cwd": ".",
+        "timeoutSec": 120,
+        "comment": "Updating Project Osmos plugin"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"${PROJECT_OSMOS_CLAUDE_UPDATE_HOOK:-}\" = \"1\" ]; then exit 0; fi; command -v claude >/dev/null 2>&1 || exit 0; PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin marketplace update project-osmos >/dev/null 2>&1 || true; PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin update project-osmos@project-osmos >/dev/null 2>&1 || true",
+            "timeout": 120,
+            "statusMessage": "Updating Project Osmos plugin"
+          }
+        ]
+      }
+    ]
+  }
+}

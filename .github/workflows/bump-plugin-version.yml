@@ -1,0 +1,88 @@
+name: Bump plugin version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bump marketplace versions
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          VERSION=$(python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          marketplace_path = Path(".github/plugin/marketplace.json")
+          marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+          plugins = marketplace.get("plugins", [])
+          if len(plugins) != 1:
+              raise SystemExit("Expected exactly one plugin entry")
+          major, minor, patch = map(int, marketplace["metadata"]["version"].split("."))
+
+          bump = os.environ["BUMP"]
+          if bump == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif bump == "minor":
+              minor += 1
+              patch = 0
+          elif bump == "patch":
+              patch += 1
+          else:
+              raise SystemExit(f"Unknown bump: {bump}")
+
+          version = f"{major}.{minor}.{patch}"
+          marketplace.setdefault("metadata", {})["version"] = version
+          plugins[0]["version"] = version
+          marketplace_path.write_text(json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+          print(version)
+          PY
+          )
+          BRANCH="automation/bump-plugin-v${VERSION}-${RUN_NUMBER}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate marketplace manifests
+        run: python build/validate_plugin.py
+
+      - name: Create bump branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${{ steps.bump.outputs.branch }}"
+          git add .github/plugin/marketplace.json .claude-plugin/marketplace.json
+          git commit -m "Bump plugin version to ${{ steps.bump.outputs.version }}"
+          git push origin "${{ steps.bump.outputs.branch }}"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "Bump plugin version to ${{ steps.bump.outputs.version }}" \
+            --body "Updates marketplace versions to ${{ steps.bump.outputs.version }}." \
+            --base "${{ github.ref_name }}" \
+            --head "${{ steps.bump.outputs.branch }}"

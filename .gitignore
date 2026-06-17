@@ -1,0 +1,28 @@
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime and local configuration
+.env
+.env.*
+*.log
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Validation reports
+quality-report.json
+security-report.json
+validation-results.json
+coverage-enforcement.json
+.dataprojects/

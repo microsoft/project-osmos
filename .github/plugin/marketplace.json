@@ -1,0 +1,42 @@
+{
+  "name": "project-osmos",
+  "owner": {
+    "name": "Project Osmos Team",
+    "email": "project-osmos@microsoft.com"
+  },
+  "metadata": {
+    "description": "Project Osmos marketplace for Microsoft Fabric — a plugin that starts and monitors long-running data engineering workflows.",
+    "version": "0.4.0"
+  },
+  "plugins": [
+    {
+      "name": "project-osmos",
+      "description": "Project Osmos plugin for Microsoft Fabric — starts and monitors long-running data engineering workflows.",
+      "version": "0.4.0",
+      "source": "./",
+      "skills": [
+        "./skills/project-osmos"
+      ],
+      "hooks": "./hooks.json",
+      "agents": [],
+      "mcpServers": {},
+      "repository": "https://github.com/microsoft/project-osmos",
+      "license": "MIT",
+      "keywords": [
+        "project-osmos",
+        "fabric-osmos",
+        "project-osmos-agent",
+        "microsoft-fabric",
+        "agentic-data-engineering",
+        "data-engineering",
+        "osmos",
+        "spark"
+      ],
+      "category": "data-engineering",
+      "tags": [
+        "microsoft-fabric",
+        "agent-skills"
+      ]
+    }
+  ]
+}
