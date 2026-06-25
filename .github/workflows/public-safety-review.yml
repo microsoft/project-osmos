@@ -1,0 +1,32 @@
+name: Public safety review
+
+on:
+  pull_request:
+    branches: [public]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-ai-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request GitHub Copilot public-safety review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pull.number,
+                reviewers: ['copilot'],
+              });
+              core.info('Requested GitHub Copilot public-safety review.');
+            } catch (error) {
+              core.warning(`Could not request Copilot review: ${error.message}`);
+            }
+

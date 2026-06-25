@@ -75,8 +75,8 @@ Note: To change any recommended setting, reply with `change <N>`. To understand 
     Why: <…>
 
  8. Reasoning effort
-    → low
-    Why: Low is selected by default for fastest execution; increase reasoning effort if you want the agent to spend more planning/search time on complex logic, risky writes, schema changes, or deeper validation.
+    → medium
+    Why: Medium is the default for a balanced budget; lower to `low` for the fastest path on simple work, or raise to `high` or `xhigh` to let the agent run more experiments on complex, ambiguous, or risky work (it will take longer).
 
 Reply with one of:
   • accept         — start the run with these settings
@@ -199,7 +199,7 @@ target table from a previous run, what should it do?
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
 | `fail if target already populated` ← recommended | **fail if target already populated** — hard stop with an error. Forces you to confirm the re-run intent explicitly. | Recommended. |
-| `append (duplicates allowed)` | **append (duplicates allowed)** — just add more rows, don't check for duplicates. | Use only when duplicate rows are acceptable. |
+| `append (duplicates allowed)` | **append (duplicates allowed)** — just add more rows, don't check for duplicates. | This was the silent default in the 5/3 invoice incident. |
 | `append with dedup key` | **append with dedup key** — you name a key column (e.g., `INVOICE_ID`); agent removes existing rows that match before inserting. | Best for incremental loads. |
 | `overwrite (truncate then write)` | **overwrite (truncate then write)** — delete everything in the target, then write. Destroys whatever was there. | Only for tables you fully own. |
 
@@ -247,17 +247,19 @@ work, but may cost more time.
 
 | Option | Label shown to user | Notes |
 |---|---|---|
-| `low` ← default | **low** — fastest path; use minimal branching/search and straightforward validation. | Always pre-filled by default. |
-| `medium` | **medium** — balanced planning/search with normal validation. | User can choose this for ordinary multi-step ingest/additive work. |
-| `high` | **high** — spend extra planning/search budget, consider more alternatives, and validate more deeply before final writes. | User can choose this when complexity, ambiguity, write risk, schema risk, or rollback risk is high. |
+| `low` | **low** — fastest path; minimal exploration and straightforward validation. | User can choose this for simple read-only or low-risk work. |
+| `medium` ← default | **medium** — balanced budget with normal validation. | Always pre-filled by default. |
+| `high` | **high** — extra budget; the agent runs more experiments and considers more alternatives, validating more deeply before final writes. | User can choose this when complexity, ambiguity, write risk, schema risk, or rollback risk is high. |
+| `xhigh` (aliases: `max`, `extra high`, `ultra`) | **xhigh** — maximum budget; the agent runs many experiments across planning and validation, revisiting steps and comparing results to converge on the best outcome. Slowest and most thorough. | User can choose this for the hardest, riskiest, or most ambiguous work, where quality matters more than time or cost. |
 
 ### Reasoning effort escalation guidance
 
-Question 8 always defaults to `low` in the recommendations card; do not auto-escalate by task type or complexity. The user may choose `medium` or `high`.
+Question 8 always defaults to `medium` in the recommendations card; do not auto-escalate or de-escalate by task type or complexity. The user may choose `low`, `high`, or `xhigh`.
 
-- Keep `low` for small or straightforward work: simple read-only analysis, a narrow single-file/table task, few transforms, no destructive writes, and low ambiguity.
-- Choose `medium` when the user wants more budget for normal-complexity work: multiple steps, normal ingestion/transformation, moderate validation needs, or ordinary writes with standard safety settings.
-- Choose `high` when the user wants more budget for complex or risky work: ambiguous requirements, many resources, non-trivial joins/cleaning, mutative writes, schema changes, difficult rollback/promotion, or strict validation requirements.
+- Choose `low` for small or straightforward work: simple read-only analysis, a narrow single-file/table task, few transforms, no destructive writes, and low ambiguity.
+- Keep `medium` (the default) for normal-complexity work: multiple steps, normal ingestion/transformation, moderate validation needs, or ordinary writes with standard safety settings.
+- Choose `high` for complex or risky work: ambiguous requirements, many resources, non-trivial joins/cleaning, mutative writes, schema changes, difficult rollback/promotion, or strict validation requirements.
+- Choose `xhigh` for the most demanding work: high ambiguity, large scope, risky mutations or schema changes, or strict validation — when it is worth having the agent run many experiments and take longer to converge on the best result.
 
 ## Per-task-type recommendations matrix
 
@@ -272,7 +274,7 @@ Single source of truth for asked questions and pre-filled options. *skip* = not 
 | **Question 5** Schema evolution | *skip* | `locked` | `locked` | `locked` | *n/a — schema IS the change* | `locked` |
 | **Question 6** Artifact format | `don't save` | `notebook` | `notebook` | `notebook` | `notebook` | `let the agent decide` |
 | **Question 7** Artifact destination | *skip* | `workspace folder` | `workspace folder` | `workspace folder` | `workspace folder` | `workspace folder` |
-| **Question 8** Reasoning effort | `low` | `low` | `low` | `low` | `low` | `low` |
+| **Question 8** Reasoning effort | `medium` | `medium` | `medium` | `medium` | `medium` | `medium` |
 
 ### Question count by task type
 
@@ -308,7 +310,7 @@ After the questionnaire, prepend this **binding** block verbatim to the user's i
 - Schema evolution: <answer | n/a>
 - Artifact format: <answer>
 - Artifact destination: <answer | n/a>
-- Reasoning effort: <low | medium | high>
+- Reasoning effort: <low | medium | high | xhigh>
 - Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
 - If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
 
@@ -318,11 +320,12 @@ After the questionnaire, prepend this **binding** block verbatim to the user's i
 
 For skipped or *n/a* questions, render `n/a` instead of dropping the line so the audit trail stays complete and diffable.
 
-`Reasoning effort` is the orchestrator-facing planning/search/MCTS-style budget hint:
+`Reasoning effort` is the orchestrator-facing budget hint:
 
-- `low` — prefer the fastest direct plan, minimal branching, and basic validation suitable for simple read-only or low-risk work.
-- `medium` — user-selected balanced planning/search and normal validation.
-- `high` — user-selected extra effort for alternatives, rollback/safety implications, or deeper validation.
+- `low` — fastest direct plan, minimal exploration, and basic validation suitable for simple read-only or low-risk work.
+- `medium` (default) — balanced budget with normal validation.
+- `high` — extra budget: more experiments and alternatives, with deeper validation before risky writes.
+- `xhigh` — maximum budget: many experiments across planning and validation, revisiting steps to converge on the best result. Slowest and most thorough; for the hardest or riskiest work.
 
 ## Example renders
 
@@ -341,7 +344,7 @@ User: "Profile the Invoice table. Show me row count, null counts per column, and
 - Schema evolution: n/a
 - Artifact format: don't save artifacts
 - Artifact destination: n/a
-- Reasoning effort: low
+- Reasoning effort: medium
 - Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
 - If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
 
@@ -351,7 +354,7 @@ Profile the Invoice table. Show me row count, null counts per column, and the to
 
 ### Transformative ingest (the 5/3 invoice scenario, re-run with the intake)
 
-User: "In `naresh_daily_lh2` there is a folder called `Invoice` with invoice files and a table called `Invoice` for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in `ETL/notebooks/` as `05-03-DataProject-invoice-processing`."
+User: "In `sales_lakehouse` there is a folder called `Invoice` with invoice files and a table called `Invoice` for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in `ETL/notebooks/` as `invoice-processing`."
 
 ```text
 ## Operational constraints (binding — overrides anything below)
@@ -365,10 +368,10 @@ User: "In `naresh_daily_lh2` there is a folder called `Invoice` with invoice fil
 - Schema evolution: locked
 - Artifact format: notebook
 - Artifact destination: workspace folder → ETL/notebooks/
-- Reasoning effort: low
+- Reasoning effort: medium
 - Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
 - If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
 
 ## User outcome
-In naresh_daily_lh2 there is a folder called Invoice with invoice files and a table called Invoice for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in ETL/notebooks/ as 05-03-DataProject-invoice-processing.
+In sales_lakehouse there is a folder called Invoice with invoice files and a table called Invoice for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in ETL/notebooks/ as invoice-processing.
 ```

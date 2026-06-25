@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 """Ensure marketplace and plugin versions increment relative to a base Git ref."""
 from __future__ import annotations
 

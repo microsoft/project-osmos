@@ -1,21 +1,23 @@
-#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 """Post a user follow-up to a Project Osmos task.
 
-The skill operates as a mediator between the human and the Project Osmos task:
-every user message intended for the run is POSTed to the task API with
+The skill operates as a mediator between the human and the SparkCore orchestrator:
+every user message intended for the run is POSTed to the orchestrator with
 flat `metadata.author_name` / `metadata.author_source` values so the dashboard
-can attribute it. The running `dashboard-poller.py` daemon will pick the
-message up on its next poll and write it into `state.js`.
+can attribute it without sending the nested metadata shape currently rejected
+by deployed SparkCore-direct routes. The running `dashboard-poller.py` daemon
+will pick the message up on its next poll and write it into `state.js`.
 
 Usage:
-    post-user-message.py \\
+    python3 skills/project-osmos/scripts/post-user-message.py \\
         --base-url   https://.../aichat \\
         --task-id    <uuid> \\
         --token-file <path> \\
         --message    "also dedupe by invoice_id" \\
         [--author-name "user@contoso.com"]   # auto-detected from `az` if omitted
         [--source "copilot-cli"]              # default
-        [--auth-scheme "Bearer"]              # default
+        [--auth-scheme "mwctoken"]            # default
 
 Exits 0 on 2xx response. Prints the new message id to stdout.
 
@@ -61,7 +63,7 @@ def main() -> int:
                    help="Override the author name. Defaults to `az account show --query user.name`.")
     p.add_argument("--source", default="copilot-cli",
                    help="Source label for the author (default: copilot-cli).")
-    p.add_argument("--auth-scheme", default="Bearer")
+    p.add_argument("--auth-scheme", default="mwctoken")
     p.add_argument("--timeout", type=float, default=15.0)
     args = p.parse_args()
 
@@ -85,8 +87,13 @@ def main() -> int:
             "content": args.message,
             "timestamp": ts,
             "metadata": {
-                # Flat string-valued keys are safest across service versions.
-                # The poller normalizes these into entry.author = {name, source}
+                # Flat string-valued keys: the SparkCore-direct
+                # POST /messages binder rejects nested objects inside metadata
+                # with a misleading 400 "Request body is required." The
+                # nested-author shape {"author": {"name": ..., "source": ...}}
+                # is the documented contract once the server is widened, but
+                # until then we flatten to author_name/author_source and the
+                # poller reassembles them into entry.author = {name, source}
                 # for the dashboard renderer. See references/task-lifecycle.md.
                 "author_name": author_name,
                 "author_source": args.source,

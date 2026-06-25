@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -485,6 +489,7 @@
       schema_version: 1,
       task: {
         id: "starter-preview",
+        environment: "prod",
         workspace_id: "00000000-0000-0000-0000-000000000000",
         workspace_name: "Sample workspace",
         lakehouse_id: "11111111-1111-1111-1111-111111111111",
@@ -869,16 +874,13 @@
       }
 
       var THINKING_PHRASES = [
-        "thinking", "planning", "implementing", "assessing",
-        "drafting notebook", "polling orchestrator", "contemplating the medallion",
-        "negotiating with Fabric", "checking schema", "stirring the bronze",
-        "asking the agent nicely", "reading lakehouse", "minding the deltas",
-        "reconciling counts", "consulting the spec", "inspecting tables",
-        "reviewing partitions", "lining up joins", "tallying nulls",
-        "warming the cluster", "tracing lineage", "double-checking types",
-        "weighing the merge", "auditing rows", "verifying writes",
-        "smoothing the schema", "validating output", "tidying the bronze",
-        "promoting to silver", "polishing the gold"
+        "Working on it", "Reviewing your request", "Searching through workspace",
+        "Pulling things together", "Combing through items", "Getting things ready",
+        "Thinking", "Planning", "Assessing",
+        "Contemplating", "Consulting the spec",
+        "Working through it", "Making progress", "Putting it together",
+        "Figuring it out", "Connecting the dots", "Working out the details",
+        "Weighing options", "Thinking it through", "Taking a closer look"
       ];
       var __tickerIdx = Math.floor(Math.random() * THINKING_PHRASES.length);
       var __tickerTimer = null;
@@ -978,13 +980,13 @@
           class: "recovery-pill " + authCls,
           title: authBroken
             ? (recovery.token_refresh_configured
-              ? "Token refresh failed; the poller is retrying refresh and not advancing last_polled_at until it succeeds."
-              : "The token is rejected and automatic refresh is not configured. Re-spawn with a readable initial token via --token-file or PROJECT_OSMOS_TOKEN; add --token-refresh-cmd only for later expiry.")
+              ? "MWC token refresh failed; the poller is retrying refresh and not advancing last_polled_at until it succeeds."
+              : "MWC token is rejected and automatic refresh is not configured. Re-spawn with a readable initial token via --token-file or MWC_TOKEN; add --token-refresh-cmd only for later expiry.")
             : (!authOk
               ? "The poller has not reported token health yet."
               : recovery.token_refresh_configured
-              ? "Token refresh is healthy. The poller is proactively refreshing on schedule."
-              : "The token is currently accepted. Automatic refresh is not configured for this poller run.")
+              ? "MWC token refresh is healthy. The poller is proactively refreshing on schedule."
+              : "MWC token is currently accepted. Automatic refresh is not configured for this poller run.")
         }, [authLabel]));
 
         // Auto-retry pill — always visible. Green at 0, blue while retrying, red when exhausted.
@@ -1007,10 +1009,10 @@
         controls.push(el("span", {
           class: "recovery-pill " + (refreshConfigured ? "ok" : "neutral"),
           title: tokRef > 0
-            ? "Token refreshed " + tokRef + (tokRef === 1 ? " time" : " times") + ". Last refresh at " + (fmtTs(recovery.token_refreshed_at) || "—") + "."
+            ? "MWC token refreshed " + tokRef + (tokRef === 1 ? " time" : " times") + ". Last refresh at " + (fmtTs(recovery.token_refreshed_at) || "—") + "."
             : (refreshConfigured
-              ? "Token has not yet been refreshed. Refresh runs on the configured proactive schedule."
-              : "Token refresh is not configured for this poller run; later expiry will require respawn with a fresh initial token.")
+              ? "MWC token has not yet been refreshed. Refresh runs on the configured proactive schedule."
+              : "MWC token refresh is not configured for this poller run; later expiry will require respawn with a fresh initial token.")
         }, ["🔄 Token refreshed " + tokRef + "×"]));
 
         controls.push(el("button", {
@@ -1317,8 +1319,8 @@
             ? " since " + (fmtTs(recovery.last_auth_error_at) || recovery.last_auth_error_at)
             : "";
           var authMsg = recovery.token_refresh_configured
-            ? "🔒 Token refresh failing" + since + ". The poller is retrying refresh on backoff. Last-polled is intentionally frozen until refresh succeeds — the task itself is unaffected."
-            : "🔒 Token rejected" + since + ". Automatic refresh is not configured for this poller run. Re-spawn with a readable --token-file or PROJECT_OSMOS_TOKEN; add --token-refresh-cmd only for later expiry.";
+            ? "🔒 MWC token refresh failing" + since + ". The poller is retrying refresh on backoff. Last-polled is intentionally frozen until refresh succeeds — the task itself is unaffected."
+            : "🔒 MWC token rejected" + since + ". Automatic refresh is not configured for this poller run. Re-spawn with a readable --token-file or MWC_TOKEN; add --token-refresh-cmd only for later expiry.";
           return el("div", { class: "banner auth-broken" }, [
             authMsg
           ]);

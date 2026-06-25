@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 """Dashboard state poller for Project Osmos tasks.
 
-Runs as a detached background process. Polls the Project Osmos task API
+Runs as a detached background process. Polls the SparkCore orchestrator
 on an adaptive cadence and rewrites `state.js` / `state.json` /
 `messages.ndjson` in the task's `.dataprojects/<task-id>/` directory.
 
@@ -21,8 +22,8 @@ Cadence (adaptive, all configurable):
 
 Auto-recovery (runs entirely inside the daemon, no agent involvement):
 
-  - Token refresh: long-running task sessions can outlive the initial
-    token. The daemon proactively re-runs
+  - Token refresh: SparkCore terminates agent processes near the
+    ~60-75 min token expiration window. The daemon proactively re-runs
     `--token-refresh-cmd` every `--token-refresh-interval` seconds
     (default 2700 = 45 min, under the lower bound with margin) and also
     reactively on any auth-class 4xx. Proactive swaps are validated
@@ -51,11 +52,11 @@ Run example (the skill spawns it like this):
       --base-url            "https://.../aichat/v1/.../tasks" \\
       --task-id             "<guid>" \\
       --state-dir           ".dataprojects/<guid>" \\
-      --token-file          ".dataprojects/<guid>/auth-token" \\
-      --auth-scheme         "Bearer" \\
+      --token-file          ".dataprojects/<guid>/mwc-token" \\
+      --auth-scheme         "mwctoken" \\
       --interval            60 \\
       --max-interval        180 \\
-      --token-refresh-cmd   "python3 .dataprojects/<guid>/refresh-token.py" \\
+      --token-refresh-cmd   "python3 .dataprojects/<guid>/refresh-mwc-token.py" \\
       > .dataprojects/<guid>/poller.log 2>&1 &
   echo $! > .dataprojects/<guid>/poller.pid
 """
@@ -96,7 +97,7 @@ AUTH_BODY_HINTS = ("unauthorized", "token", "invalid_token", "authentication", "
 
 # The orchestrator normally emits string status values:
 # Created, Running, Cancelling, Cancelled, Completed, Failed.
-# Some service versions have also returned the numeric enum index
+# Some deployed services have also returned the numeric enum index
 # instead (for example, status=1 mid-run), so we coerce defensively. The
 # numeric mapping MUST preserve the documented status order, including
 # Cancelling. An earlier revision of this map had
@@ -107,7 +108,7 @@ AUTH_BODY_HINTS = ("unauthorized", "token", "invalid_token", "authentication", "
 STATUS_BY_CODE = {0: "Created", 1: "Running", 2: "Cancelling", 3: "Cancelled", 4: "Completed", 5: "Failed"}
 #
 # Expected message role values are "User", "Assistant", and "System".
-# Like status, some service versions have also serialized roles as
+# Like status, some deployed services have also serialized roles as
 # numeric or stringified-digit indices in the wire payload:
 #     0 = User, 1 = Assistant, 2 = Tool (legacy), 3 = System
 # We accept all forms defensively for inbound classification. There is
@@ -230,7 +231,7 @@ def status_label(s: Any) -> str:
     """Coerce a task status value into a clean display string.
 
     The task API usually returns string status labels, but deployed
-    some service versions can return numeric codes (see STATUS_BY_CODE
+    Some deployed services can return numeric codes (see STATUS_BY_CODE
     comment block above). This helper handles both: numeric → mapped label, string →
     stripped, null/empty → "Created".
     """
@@ -282,7 +283,7 @@ def role_label(role: Any) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """Collapse repeated whitespace for dedup comparison."""
+    """Collapse internal whitespace for dedup comparison."""
     return " ".join((text or "").split())
 
 
@@ -549,8 +550,11 @@ def merge_messages(existing: list[dict[str, Any]], polled: list[dict[str, Any]])
         # follow-ups POSTed via post-user-message.py carry author info so
         # the dashboard can show "👤 <name>" on each bubble).
         #
-        # We accept both flat and nested author metadata so clients and service
-        # versions can evolve independently.
+        # We accept two shapes because the SparkCore-direct POST /messages
+        # Some deployed binders reject nested objects inside metadata
+        # today, so post-user-message.py sends flat author_name/author_source
+        # keys. Once the server widens metadata to dict[str, Any] the nested
+        # metadata.author = {name, source} shape will also round-trip.
         # Normalize both into entry.author = {name, source} so the dashboard
         # renderer at assets/dashboard.html doesn't need to know either way.
         meta = m.get("metadata") or {}
@@ -1047,8 +1051,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--task-id", required=True)
     p.add_argument("--state-dir", required=True, help="Path to .dataprojects/<task-id>/")
     p.add_argument("--token-file", help="File containing the bearer token (preferred)")
-    p.add_argument("--token-env", default="PROJECT_OSMOS_TOKEN", help="Env var fallback for the token")
-    p.add_argument("--auth-scheme", default="Bearer")
+    p.add_argument("--token-env", default="MWC_TOKEN", help="Env var fallback for the token")
+    p.add_argument("--auth-scheme", default="mwctoken")
     p.add_argument("--interval", type=float, default=60.0, help="Base poll interval (s)")
     p.add_argument("--fast-interval", type=float, default=15.0, help="Initial fast-poll interval (s)")
     p.add_argument("--fast-window", type=float, default=90.0, help="Seconds to stay in fast-poll mode")
@@ -1058,11 +1062,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=30, help="HTTP timeout (s)")
     # ----- recovery flags -----
     p.add_argument("--token-refresh-cmd",
-                   help="Shell command whose stdout is a fresh task token. If unset, no auto-refresh; "
+                   help="Shell command whose stdout is a fresh MWC token. If unset, no auto-refresh; "
                         "the daemon enters auth_broken on expiry and waits for external intervention.")
     p.add_argument("--token-refresh-interval", type=float, default=2700.0,
                    help="Proactive refresh interval (s); default 2700 (45 min). "
-                        "Reactive refresh always fires "
+                        "SparkCore terminates agent processes near the ~60-75 min "
+                        "token expiry window, so we refresh comfortably under the "
+                        "lower bound with margin. Reactive refresh always fires "
                         "on auth 4xx regardless.")
     p.add_argument("--token-refresh-timeout", type=int, default=120,
                    help="Max wall time (s) for one --token-refresh-cmd invocation.")
@@ -1583,7 +1589,7 @@ def _compute_next_interval(
 
 
 def _capacity_id_from_base_url(base_url: str) -> str | None:
-    """Extract /capacities/<id>/ from task base URLs when present."""
+    """Extract /capacities/<id>/ from SparkCore direct-route base URLs."""
     match = re.search(r"/capacities/([^/]+)/workloads/", base_url)
     return match.group(1) if match else None
 
@@ -1769,7 +1775,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     )
 
     # exit_reason and exit_status are intentionally different shapes:
-    #   - exit_reason: daemon tag (lowercase snake_case); joins
+    #   - exit_reason: daemon-internal tag (lowercase snake_case); joins
     #     the same set as "crash", "signal", "max_runtime",
     #     "terminal_status", "no_progress_window", etc. Consumed by
     #     terminal.json readers as a machine-friendly key.

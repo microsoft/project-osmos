@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 """Poll a Project Osmos task and print new assistant messages."""
 from __future__ import annotations
 
@@ -52,16 +53,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True, help="Task base URL without trailing task ID")
     parser.add_argument("--task-id", required=True, help="Project Osmos task ID")
-    parser.add_argument("--token-env", default="PROJECT_OSMOS_TOKEN", help="Environment variable containing the task authorization token")
-    parser.add_argument("--auth-scheme", default="Bearer", help="Authorization scheme, such as Bearer")
+    parser.add_argument("--mwc-token-env", default="MWC_TOKEN", help="Environment variable containing the MWC token")
+    parser.add_argument("--auth-scheme", default="mwctoken", help="Authorization scheme, such as mwctoken or MwcToken")
     parser.add_argument("--poll-interval", type=float, default=5.0, help="Seconds between polls")
     parser.add_argument("--max-polls", type=int, default=120, help="Maximum poll attempts before exiting")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
 
-    token = os.environ.get(args.token_env)
+    token = os.environ.get(args.mwc_token_env)
     if not token:
-        print(f"Missing token environment variable: {args.token_env}", file=sys.stderr)
+        print(f"Missing token environment variable: {args.mwc_token_env}", file=sys.stderr)
         return 2
 
     base_url = args.base_url.rstrip("/")

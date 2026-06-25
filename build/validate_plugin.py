@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 """Validate the Copilot CLI marketplace manifest for project-osmos."""
 from __future__ import annotations
 
