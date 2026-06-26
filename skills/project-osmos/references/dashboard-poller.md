@@ -8,7 +8,8 @@ After the task is `Running` and the CLI summary table has been printed (the dash
 
 ### Required environment variables
 
-Set these from [`auth-and-routing.md`](auth-and-routing.md) and [`environment-routing.md`](environment-routing.md):
+Set these from [`auth-and-routing.md`](auth-and-routing.md):
+
 
 | Variable | Source |
 | --- | --- |
@@ -47,9 +48,9 @@ unset MWC_TOKEN PBI_TOKEN BEARER
 
 ### Step 2 — compose the token refresh recipe
 
-The daemon invokes this command near the ~1.5h expiry or after any auth-class 4xx. Stdout must be the fresh raw bearer token — no JSON wrapper or surrounding whitespace.
+The daemon invokes this command near the ~1.5h expiry or after any auth-class 4xx. Stdout must be the fresh raw MWC token for the task route — no JSON wrapper or surrounding whitespace.
 
-Keep the Power BI bearer token out of `argv` and the environment: do the `az` call and `generatemwctoken` POST inside one Python process, using `urllib` headers held in memory instead of `curl -H "Authorization: Bearer ..."`. The poller supplies `/dev/null` as stdin so detached macOS daemons can spawn Python-based tools such as `az` without inheriting an interactive TTY.
+Keep the Power BI bearer token out of `argv` and exported variables: do the `az` call and `generatemwctoken` POST inside one Python process, using `urllib` headers held in memory instead of `curl -H "Authorization: Bearer ..."`. The poller supplies `/dev/null` as stdin so detached macOS daemons can spawn Python-based tools such as `az` without inheriting an interactive TTY.
 
 ```bash
 REFRESH_SCRIPT="$(mktemp)"; chmod 700 "$REFRESH_SCRIPT"
@@ -149,7 +150,7 @@ fi
 tail -1 ".dataprojects/$TASK_ID/poller.log"
 ```
 
-> `--token-refresh-cmd` is **optional**. If omitted, the daemon will not auto-refresh and will enter `auth_status: "broken"` when the token expires. Always pass a recipe for production-shape runs with expiring auth.
+> `--token-refresh-cmd` is **optional**. If omitted, the daemon will not auto-refresh and will enter `auth_status: "broken"` when the token expires. Always pass a recipe for runs with expiring auth.
 
 
 ## Cadence
@@ -196,4 +197,4 @@ It honors `SIGTERM` and `SIGINT` for clean shutdown: the `pid` file is removed, 
 
 On re-engage, read `terminal.json` first. If it exists, the poller exited cleanly enough to record `reason` (including `signal`, `max_runtime`, and `no_progress_window`); report that reason and ask before respawning. If `terminal.json` is absent and the recorded PID is not alive, treat it as an ungraceful death (machine sleep, reboot, OOM, `kill -9`) and respawn.
 
-Before respawning, re-acquire a fresh MWC token and recreate the `--token-refresh-cmd` recipe from the current environment setup. The spawn snippet above builds that command from a `mktemp` helper script, so the old argv may point at a deleted file after reboot or `/tmp` cleanup. Reuse the same non-secret arguments (`--base-url`, `--task-id`, `--state-dir`, cadences, retry limits), but do not blindly reuse stale token files or refresh-script paths. The on-disk `state.json` is the source of truth — the new poller picks up where the old one left off and de-dupes messages by `id`. See [SKILL.md → Non-negotiables](../SKILL.md).
+Before respawning, re-acquire a fresh MWC token and recreate the `--token-refresh-cmd` recipe from the current auth setup. The spawn snippet above builds that command from a `mktemp` helper script, so the old argv may point at a deleted file after reboot or `/tmp` cleanup. Reuse the same non-secret arguments (`--base-url`, `--task-id`, `--state-dir`, cadences, retry limits), but do not blindly reuse stale token files or refresh-script paths. The on-disk `state.json` is the source of truth — the new poller picks up where the old one left off and de-dupes messages by `id`. See [SKILL.md → Non-negotiables](../SKILL.md).

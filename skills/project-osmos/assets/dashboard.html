@@ -489,7 +489,6 @@ Licensed under the MIT license.
       schema_version: 1,
       task: {
         id: "starter-preview",
-        environment: "prod",
         workspace_id: "00000000-0000-0000-0000-000000000000",
         workspace_name: "Sample workspace",
         lakehouse_id: "11111111-1111-1111-1111-111111111111",
@@ -1060,7 +1059,7 @@ Licensed under the MIT license.
               status
             ])
           ]),
-          el("div", { class: "sub" }, [(task.id || "(no id)") + "  ·  " + (task.environment || "—")])
+          el("div", { class: "sub" }, [task.id || "(no id)"])
         ];
         if (summary) children.push(el("div", { class: "summary" }, [summary]));
         return el("div", { class: "page-head" }, children);
@@ -1096,7 +1095,6 @@ Licensed under the MIT license.
         var intake = state.intake || {};
         var taskCard = card("task", "Task", [
           el("dl", { class: "kv" }, [
-            el("dt", null, ["Environment"]), el("dd", null, [task.environment || "—"]),
             el("dt", null, ["Workspace"]), el("dd", null, [
               (task.workspace_name || "—") + " ",
               el("span", { class: "id" }, ["(" + (task.workspace_id || "—") + ")"])

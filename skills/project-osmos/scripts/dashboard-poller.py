@@ -1149,8 +1149,8 @@ def _apply_task_payload(
     decisions key off of. Status is derived from runDetails completion markers
     without overriding explicit cancellation or failure statuses from the task
     payload."""
-    for k in ("status", "environment", "workspace_id", "workspace_name",
-              "lakehouse_id", "lakehouse_name", "created_at", "started_at"):
+    for k in ("status", "workspace_id", "workspace_name", "lakehouse_id",
+              "lakehouse_name", "created_at", "started_at"):
         v = task_payload.get(k)
         if v is not None:
             task_block[k] = status_label(v) if k == "status" else v
@@ -1621,7 +1621,6 @@ def _build_terminal_payload(
         "reason": exit_reason,
         "exit_code": exit_code,
         "task_id": args.task_id,
-        "environment": task_block.get("environment"),
         "workspace_id": task_block.get("workspace_id"),
         "workspace_name": task_block.get("workspace_name"),
         "lakehouse_id": task_block.get("lakehouse_id"),
@@ -1672,7 +1671,6 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             "reason": "no_token_at_startup",
             "exit_code": _exit_code_for("no_token_at_startup"),
             "task_id": args.task_id,
-            "environment": task_block.get("environment"),
             "workspace_id": task_block.get("workspace_id"),
             "workspace_name": task_block.get("workspace_name"),
             "lakehouse_id": task_block.get("lakehouse_id"),
@@ -1790,7 +1788,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     try:
         while not stop["flag"]:
             # Reload state from disk each cycle so out-of-band agent edits to
-            # agent-authored fields (summary, intake.*, spec, task.environment,
+            # agent-authored fields (summary, intake.*, spec,
             # task.workspace_name, task.lakehouse_name, etc.) survive.
             state = load_state(state_dir / "state.json")
             task_block = task_state_block(state)

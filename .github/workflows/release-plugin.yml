@@ -44,10 +44,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+          if target="$(gh release view "${{ steps.version.outputs.tag }}" --json targetCommitish --jq .targetCommitish 2>/dev/null)"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "target=${target}" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "target=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub release
@@ -59,3 +61,16 @@ jobs:
             --title "${{ steps.version.outputs.tag }}" \
             --notes "Project Osmos plugin ${{ steps.version.outputs.version }}" \
             --target "$GITHUB_SHA"
+
+      - name: Verify release target
+        id: release-target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          target="$(gh release view "${{ steps.version.outputs.tag }}" --json targetCommitish --jq .targetCommitish)"
+          if [ "$target" != "$GITHUB_SHA" ]; then
+            echo "::error::Release ${{ steps.version.outputs.tag }} points to ${target}, expected ${GITHUB_SHA}."
+            exit 1
+          fi
+          echo "source_sha=${target}" >> "$GITHUB_OUTPUT"
+

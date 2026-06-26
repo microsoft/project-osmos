@@ -14,14 +14,14 @@ Use this skill when the user wants Project Osmos to solve a complex Fabric/OneLa
 
 ## Operating contract
 
-This file is the lean routing contract. Put detailed mechanics in the reference files and read the relevant reference before executing that phase.
+This file is the lean runtime contract. Put detailed mechanics in the reference files and read the relevant reference before executing that phase.
 
-1. **Lakehouse URL first.** Ask only for the Fabric Lakehouse browser URL. Parse environment, workspace ID, and default Spark-session Lakehouse ID with [URL parsing](references/url-parsing.md). Never ask for environment or IDs as separate startup fields.
-2. **Confirm before API calls.** Echo the parsed environment and both GUIDs in full. If the URL lacks a Lakehouse ID or maps to an unsupported host, ask for a corrected Lakehouse URL.
+1. **Lakehouse URL first.** Ask only for the Fabric Lakehouse browser URL. Parse the workspace ID and default Spark-session Lakehouse ID with [URL parsing](references/url-parsing.md). Never ask for IDs as separate startup fields.
+2. **Confirm before API calls.** Echo both GUIDs in full. If the URL lacks a Lakehouse ID or uses an unsupported host, ask for a corrected Lakehouse URL.
 3. **Resolve names.** Before seeding the dashboard, resolve `workspace_name`, `capacity_id` (from the API `capacityId` field), and `lakehouse_name` using [Authentication and route construction](references/auth-and-routing.md). Surface lookup failures; do not fall back to `(unknown)` or substitute GUIDs.
 4. **Collect the outcome.** After URL confirmation, ask for the task instructions, then one optional "Anything else I should know?" prompt. Use `ask_user` with the first choice `"No, nothing else"` and freeform enabled so the user can either skip quickly or type extra context. Keep the user's complete outcome and guidance verbatim.
 5. **Run intake.** Classify the task and render the recommendations card from [Operational intake questionnaire](references/intake-questionnaire.md). Append the rendered `## Operational constraints` block verbatim before `PUT /{taskId}` and before the initial user message.
-6. **Route and authenticate.** Resolve the environment-specific SparkCore task host and MWC token with [Environment routing](references/environment-routing.md) and [Authentication and route construction](references/auth-and-routing.md). Keep production and MSIT routing details public because the agent needs them to operate correctly.
+6. **Authenticate and construct the task route.** Resolve the SparkCore task host and MWC token with [Authentication and route construction](references/auth-and-routing.md).
 
 
 7. **Create and run one task.** Use one generated task ID for create, message, run, retries, and follow-ups. Follow [Task lifecycle](references/task-lifecycle.md) for endpoint shapes and response handling.
@@ -31,7 +31,6 @@ This file is the lean routing contract. Put detailed mechanics in the reference 
    | Field | Value |
    | --- | --- |
    | Task ID | `<task-id>` |
-   | Environment | `<env>` |
    | Workspace | `<workspace_name> (<workspace_id-short>)` |
    | Spark session lakehouse | `<lakehouse_name> (<lakehouse_id-short>)` |
    | Operation | `<operation_id>` |
@@ -58,9 +57,8 @@ This file is the lean routing contract. Put detailed mechanics in the reference 
 
 ## References
 
-- [URL parsing](references/url-parsing.md) — URL-first intake and environment mapping
+- [URL parsing](references/url-parsing.md) — URL-first intake and public Fabric URL validation
 - [Operational intake questionnaire](references/intake-questionnaire.md) — task types, recommendations card, Questions 1-8, skip logic, rendered preamble
-- [Environment routing](references/environment-routing.md) — supported environments and host families
 - [Authentication and route construction](references/auth-and-routing.md) — authentication flow and task base URL
 - [Task lifecycle](references/task-lifecycle.md) — task/message/run endpoints, statuses, response shapes
 - [Status dashboard](references/dashboard.md) — `./.dataprojects/<task-id>/` layout and `window.__STATE` schema

@@ -20,7 +20,7 @@ PUBLISH_WARNING = (
     "Marketplace and plugin versions were not bumped. Unless .github/plugin/marketplace.json "
     "metadata.version and plugin entry version are bumped, the package and changes will not be published."
 )
-PREVIEW_RELEASE = True
+PREVIEW_RELEASE = False
 ISSUE_UNCHANGED = "unchanged"
 ISSUE_ROLLBACK = "rollback"
 ISSUE_PREVIEW_MAJOR = "preview_major"

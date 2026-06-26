@@ -1,23 +1,18 @@
 # Authentication and route construction
 
-Build the direct SparkCore task route after parsing the environment from the user's Lakehouse browser URL.
+Build the direct SparkCore task route after parsing and confirming the user's Lakehouse browser URL.
 
-## Production-shape environments
+## Public Fabric route
 
 Use a Power BI bearer token, workspace capacity lookup, MWC token generation, and a capacity-scoped SparkCore route.
 
-Public production-shape hosts:
+Public hosts:
 | Purpose | Host |
 | --- | --- |
-| Production workspace metadata and capacity lookup | `https://api.fabric.microsoft.com` |
-| MSIT workspace metadata and capacity lookup | `https://msitapi.fabric.microsoft.com` |
-| Production MWC token exchange | `https://api.fabric.microsoft.com/metadata/v201606/generatemwctoken` |
-| MSIT MWC token exchange | `https://msitapi.fabric.microsoft.com/metadata/v201606/generatemwctoken` or `https://wabi-msit-us-east2-redirect.analysis.windows.net/metadata/v201606/generatemwctoken` |
-
-Use the production Fabric API host for `prod`; use the MSIT Fabric API or WABI redirect host for `msit`.
+| Workspace metadata and capacity lookup | `https://api.fabric.microsoft.com` |
+| MWC token exchange | `https://api.fabric.microsoft.com/metadata/v201606/generatemwctoken` |
 
 
-> **Fabric API fallback for MWC token exchange:** In production-shape environments, prefer the Fabric API host for `generatemwctoken`. For MSIT, the regional WABI redirect host and the Fabric API host use the same `/metadata/v201606/generatemwctoken` path; when WABI is unreachable, use the Fabric API host instead.
 > **Use `TargetUriHost` for SparkCore:** The `generatemwctoken` response includes a `TargetUriHost` field that is the routed SparkCore host for that capacity. Use it directly as the workload host instead of guessing a generic hostname.
 
 ### Token and route steps
@@ -34,9 +29,9 @@ Use the production Fabric API host for `prod`; use the MSIT Fabric API or WABI r
 
 #### Worked example
 
-Set `FABRIC_API_HOST` to `https://api.fabric.microsoft.com` for production or `https://msitapi.fabric.microsoft.com` for MSIT. Keep tokens in environment variables, not on command lines.
+Set `FABRIC_API_HOST` to `https://api.fabric.microsoft.com`. Keep tokens in exported environment variables rather than hardcoding them in commands or files.
 ```bash
-# 1. Power BI bearer token (stored in env, not on the command line; pass --tenant explicitly)
+# 1. Power BI bearer token (stored in an environment variable; pass --tenant explicitly)
 export PBI_TOKEN=$(az account get-access-token \
   --tenant <tenant-id> \
   --resource https://analysis.windows.net/powerbi/api \
@@ -67,6 +62,8 @@ curl -s -X POST \
     "artifactObjectIds": ["{lakehouseId}"]
   }'
 ```
+The `curl` snippets are for interactive setup and expand `$PBI_TOKEN` into the process arguments for the duration of each command. For detached or long-lived token refresh, use the Python refresh recipe in [Spawning the dashboard poller daemon](dashboard-poller.md) so bearer headers stay in process memory instead of `argv`.
+
 Capture the response `Token` value as `MWC_TOKEN` and `TargetUriHost` as `SPARKCORE_HOST` (do not echo token values):
 ```bash
 export MWC_TOKEN="<token-from-generatemwctoken-response>"
@@ -76,11 +73,10 @@ Direct route shape:
 ```text
 https://{SPARKCORE_HOST}/webapi/capacities/{capacityId}/workloads/SparkCore/SparkCoreService/direct/v1/workspaces/{workspaceId}/artifacts/{lakehouseId}/aichat
 ```
-Production-shape routes normally use:
+Public Fabric routes normally use:
 ```text
 Authorization: mwctoken {token}
 ```
-
 
 
 ## Secret handling

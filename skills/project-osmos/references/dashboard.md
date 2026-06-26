@@ -46,9 +46,6 @@ window.__STATE = {
   schema_version: 1,
   task: {
     id: "uuid",
-    environment: "prod" | "msit",
-
-
     workspace_id: "guid",
     workspace_name: "string",
     lakehouse_id: "guid",     // Spark session default lakehouse — NOT necessarily source or destination
@@ -152,9 +149,6 @@ window.__STATE = {
     reason: "terminal_status" | "max_runtime" | "max_auto_retries" | "no_progress_window" | "retry_signature_repeat" | "no_token_at_startup" | "run_post_failed_<HTTP>" | "crash" | "signal" | "unknown",
     exit_code: 0,
     task_id: "uuid",
-    environment: "prod | msit | null",
-
-
     workspace_id: "guid | null",
     workspace_name: "string | null",
     lakehouse_id: "guid | null",
@@ -173,6 +167,7 @@ window.__STATE = {
   }
 };
 ```
+
 
 ### `terminal.json` (sibling file)
 
@@ -224,11 +219,6 @@ exact path shown:
 value is `null`:
 - `task.id` — the generated UUID for the task (matches
   `./.dataprojects/<task-id>/`).
-- `task.environment` — the resolved environment string (`prod`, `msit`).
-  Not returned by the task GET
-  API; the skill is the only source.
-
-
 - `task.workspace_id` — from URL parse.
 - `task.workspace_name` — fetched with `GET /v1/workspaces/{workspaceId}`,
   field `displayName`. Never blank, never `(unknown)`, never the GUID.

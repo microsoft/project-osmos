@@ -199,7 +199,7 @@ target table from a previous run, what should it do?
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
 | `fail if target already populated` ← recommended | **fail if target already populated** — hard stop with an error. Forces you to confirm the re-run intent explicitly. | Recommended. |
-| `append (duplicates allowed)` | **append (duplicates allowed)** — just add more rows, don't check for duplicates. | This was the silent default in the 5/3 invoice incident. |
+| `append (duplicates allowed)` | **append (duplicates allowed)** — just add more rows, don't check for duplicates. | Use only when duplicate rows are acceptable. |
 | `append with dedup key` | **append with dedup key** — you name a key column (e.g., `INVOICE_ID`); agent removes existing rows that match before inserting. | Best for incremental loads. |
 | `overwrite (truncate then write)` | **overwrite (truncate then write)** — delete everything in the target, then write. Destroys whatever was there. | Only for tables you fully own. |
 
@@ -352,7 +352,7 @@ User: "Profile the Invoice table. Show me row count, null counts per column, and
 Profile the Invoice table. Show me row count, null counts per column, and the top 5 invoice amounts.
 ```
 
-### Transformative ingest (the 5/3 invoice scenario, re-run with the intake)
+### Transformative ingest (re-run with the intake)
 
 User: "In `sales_lakehouse` there is a folder called `Invoice` with invoice files and a table called `Invoice` for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in `ETL/notebooks/` as `invoice-processing`."
 

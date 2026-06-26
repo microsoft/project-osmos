@@ -1,8 +1,8 @@
 # Task lifecycle
 
-Use this lifecycle after resolving the base task URL and auth header. Writes use string role values; reads must defensively normalize numeric/stringified-numeric values seen in deployed rings.
+Use this lifecycle after resolving the base task URL and auth header. Writes use string role values; reads must defensively normalize numeric/stringified-numeric values seen in deployed routes.
 
-Examples assume `BASE` is the task base URL and `MWC_TOKEN` is in the environment. Production-shape routes use `mwctoken`.
+Examples assume `BASE` is the task base URL and `MWC_TOKEN` is available to the shell. Public Fabric routes use `mwctoken`.
 
 
 ```bash
@@ -78,7 +78,7 @@ curl -s -X POST \
 
 Observed success is `204 No Content`; do not expect JSON. Add multiple messages before running only with unique `id` values.
 
-### `metadata` schema constraint (production-shape routes)
+### `metadata` schema constraint
 
 SparkCore-direct `POST /messages` rejects **any nested object inside `metadata`** with misleading `HTTP 400 {"message":"Request body is required."}`. The body is valid JSON; deserialization fails because `metadata` is declared roughly as `Dict[str, str]`, and the global exception handler emits generic empty-body wording.
 
@@ -125,7 +125,7 @@ Expected `task.status` string values are `Created`, `Running`, `Cancelling`, `Ca
 
 Expected message `role` string values are `User`, `Assistant`, and `System`.
 
-For outbound writes, use the string values above. For inbound reads, keep defensive compatibility: some deployments have returned numeric or stringified-numeric status/role values even though the canonical task API values are strings. The poller normalizes both forms so deployed wire-shape drift does not break the dashboard.
+For outbound writes, use the string values above. For inbound reads, keep defensive compatibility: some deployed routes have returned numeric or stringified-numeric status/role values even though the canonical task API values are strings. The poller normalizes both forms so wire-shape drift does not break the dashboard.
 
 
 Even with string enums, derive terminal states from `runDetails.completedAt` and `runDetails.errorMessage` rather than `task.status` alone. The poller transiently flips `task.status` back to `Running` while auto-retrying the documented Spark statement transient (clearing `completedAt` and `status_detail`), so use `completedAt + errorMessage` to decide whether a run is truly done.
@@ -188,7 +188,7 @@ Observed deployed task shape:
 }
 ```
 
-`runDetails.operationId` is present on production-shape deployments. If a route omits `operationId`, expect it to be missing or `null`.
+`runDetails.operationId` is present on public deployed routes. If a route omits `operationId`, expect it to be missing or `null`.
 
 
 Observed deployed conversation shape:

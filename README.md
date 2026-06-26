@@ -1,9 +1,8 @@
-# Project Osmos for Fabric - Copilot CLI plugin
+# Project Osmos for Fabric - Copilot plugin
 
-GitHub Copilot CLI plugin for **Project Osmos** in Microsoft Fabric.
+Agent plugin to use **Project Osmos** in Microsoft Fabric from your favorite AI coding assistant.
 
 This repository ships the `project-osmos` domain skill plus session-start hooks that keep the installed plugin fresh in GitHub Copilot CLI and Claude Code.
-
 
 ## What Project Osmos does
 
@@ -21,16 +20,7 @@ In short, the local skill is a thin control plane that drives the remote agent l
 
 ## Audience
 
-Users with Project Osmos access who want to try Project Osmos in Fabric environments.
-
-## Supported Fabric environments
-
-The skill derives the target environment from the pasted Lakehouse browser URL. There is no default environment.
-
-| Environment | Use when | Notes |
-| --- | --- | --- |
-| Production Fabric | Public Fabric tenant usage. | Use when Project Osmos is enabled for your tenant. |
-| `msit` | MSIT environment validation. | Requires matching API, WABI, and workload hosts. |
+Users with Project Osmos access who want to automate Fabric data engineering workflows.
 
 
 ## Prerequisites
@@ -39,7 +29,7 @@ The skill derives the target environment from the pasted Lakehouse browser URL. 
 | --- | --- |
 | GitHub Copilot CLI | macOS: `brew install copilot-cli` &nbsp;·&nbsp; cross-platform: `npm install -g @github/copilot` |
 | Azure CLI | macOS: `brew install azure-cli` &nbsp;·&nbsp; other platforms: see the [official install docs](https://learn.microsoft.com/cli/azure/install-azure-cli). |
-| Fabric workspace with capacity | A workspace in your target environment that contains a lakehouse. Open the Lakehouse in Fabric and copy the full browser URL. |
+| Fabric workspace with capacity | A workspace that contains a lakehouse. Open the Lakehouse in Fabric and copy the full browser URL. |
 | Permissions | Contributor or higher on the target workspace. |
 
 ## Install
@@ -115,7 +105,7 @@ copilot
 
 ### 3. Ask Copilot to start Project Osmos
 
-Type a prompt inside Copilot CLI that mentions Project Osmos. The skill will ask for the Fabric Lakehouse browser URL first, parse the environment, workspace ID, and default Spark-session Lakehouse ID, then ask for your task instructions.
+Type a prompt inside Copilot CLI that mentions Project Osmos. The skill will ask for the Fabric Lakehouse browser URL first, parse the workspace ID and default Spark-session Lakehouse ID, then ask for your task instructions.
 
 Copilot CLI prompt:
 
@@ -149,7 +139,6 @@ copilot --resume
 2. Full data engineering task instruction.
 3. Optional extra guidance from the "Anything else I should know?" prompt.
 
-
 Another example instruction you can adapt:
 
 ```text
@@ -162,8 +151,8 @@ Use Project Osmos to load the Orders table from my lakehouse, remove rows with m
 | --- | --- |
 | Skill is not listed in `/skills` | Skill discovery may run before a first-time install completes. Re-run the marketplace install step from [Install](#install), then restart Copilot CLI. |
 | Azure CLI token check fails | Run `az login`, confirm the expected tenant and account with `az account show`, then retry. |
-| Capacity lookup fails | Confirm the workspace is assigned to a Fabric capacity and your Azure CLI identity can read workspace metadata in the target environment. |
-| Workspace lookup fails | Confirm the Lakehouse browser URL is from the target environment and that your Azure CLI identity has access to the workspace. |
+| Capacity lookup fails | Confirm the workspace is assigned to a Fabric capacity and your Azure CLI identity can read workspace metadata. |
+| Workspace lookup fails | Confirm the Lakehouse browser URL is correct and that your Azure CLI identity has access to the workspace. |
 | Workspace has no capacity | Use a workspace already assigned to a Fabric capacity before running Project Osmos. |
 | Lakehouse lookup or task creation fails | Confirm the Lakehouse URL points to a lakehouse in the same workspace being resolved. |
 | `POST /run` returns an instruction-related error | The task was created without the instruction. Ask Copilot to recreate or update the task with the full instruction field before running. |
