@@ -30,6 +30,7 @@ Users with Project Osmos access who want to automate Fabric data engineering wor
 | GitHub Copilot CLI | macOS: `brew install copilot-cli` &nbsp;·&nbsp; cross-platform: `npm install -g @github/copilot` |
 | Azure CLI | macOS: `brew install azure-cli` &nbsp;·&nbsp; other platforms: see the [official install docs](https://learn.microsoft.com/cli/azure/install-azure-cli). |
 | Fabric workspace with capacity | A workspace that contains a lakehouse. Open the Lakehouse in Fabric and copy the full browser URL. |
+| Fabric Copilot setting | The Fabric setting **"User can use Copilot and other features powered by Azure OpenAI"** must be enabled for either the tenant or the target workspace. |
 | Permissions | Contributor or higher on the target workspace. |
 
 ## Install
