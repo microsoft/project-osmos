@@ -50,13 +50,13 @@ copilot plugin install project-osmos@project-osmos
 </details>
 
 <details>
-<summary><strong>Copilot CLI Install slash commands</strong></summary>
+<summary><strong>Codex Install Terminal</strong></summary>
 
-Open Copilot CLI with `copilot`, then run:
+Run these commands from your shell:
 
-```text
-/plugin marketplace add microsoft/project-osmos
-/plugin install project-osmos@project-osmos
+```bash
+codex plugin marketplace add microsoft/project-osmos
+codex plugin add project-osmos@project-osmos
 ```
 
 </details>

@@ -12,6 +12,7 @@ Public hosts:
 | Workspace metadata and capacity lookup | `https://api.fabric.microsoft.com` |
 | MWC token exchange | `https://api.fabric.microsoft.com/metadata/v201606/generatemwctoken` |
 
+
 > **Use `TargetUriHost` for SparkCore:** The `generatemwctoken` response includes a `TargetUriHost` field that is the routed SparkCore host for that capacity. Use it directly as the workload host instead of guessing a generic hostname.
 
 ### Token and route steps
@@ -58,6 +59,7 @@ Public Fabric routes normally use:
 ```text
 Authorization: mwctoken <contents of TOKEN_FILE>
 ```
+
 
 ## Secret handling
 

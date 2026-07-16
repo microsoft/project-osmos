@@ -305,7 +305,7 @@ default browser:
 |---|---|
 | macOS | `open <path>` |
 | Linux | `xdg-open <path>` |
-| Windows | `start "" <path>` |
+| Windows | `start "" "file:///<path>"` — convert backslashes to forward slashes (e.g., `file:///C:/Users/me/dashboard.html`) |
 
 If the open command fails (return code non-zero, command not found),
 the skill prints the absolute path so the user can click it manually

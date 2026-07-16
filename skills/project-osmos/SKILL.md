@@ -1,16 +1,15 @@
 ---
 name: project-osmos
-description: >
-  Project Osmos for Microsoft Fabric. Use for complex, long-running
-  Fabric/OneLake data engineering workflows where the agent should write and run
-  Spark code, transform or modify tables, and produce notebooks or outputs with
-  a long-running autonomous agent. Triggers: "Project Osmos", "Fabric data engineering",
-  "Spark Transform Notebook", "OneLake ETL", "Fabric Project Osmos".
+description: Use Project Osmos agents for Microsoft Fabric data engineering tasks that create or update notebooks, Spark code, Lakehouses, and OneLake resources. Triggers: "Project Osmos", "Fabric data engineering", "Spark Transform Notebook", "OneLake ETL", "Fabric Project Osmos".
 ---
 
 # Project Osmos for Microsoft Fabric
 
 Use this skill when the user wants Project Osmos to solve a complex Fabric/OneLake workflow end-to-end: inspect data, write and run Spark, transform or modify tables, produce notebooks or outputs, and keep working through a long-running autonomous agent.
+
+## Scope
+
+Use Project Osmos for data engineering tasks that create or update notebooks, Lakehouses, OneLake resources, and Spark code. Use [Microsoft Fabric Skills](https://github.com/microsoft/skills-for-fabric) for tasks outside Project Osmos: Power BI dashboards, reports, semantic models, and PBIP artifacts; Fabric Warehouses and T-SQL objects; Eventhouse/KQL, Eventstreams, Dataflows Gen2, and Data Factory pipelines; and general Fabric item, workspace, capacity, deployment, or monitoring operations.
 
 ## Operating contract
 

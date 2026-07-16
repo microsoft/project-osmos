@@ -1,6 +1,31 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-"""Resolve Project Osmos auth, token, and task routing."""
+"""Resolve Project Osmos auth, token, and task routing.
+
+This helper performs the same sequence documented in the Project Osmos skill:
+
+1. Acquire a tenant-scoped Power BI bearer token with Azure CLI.
+2. Read workspace and lakehouse metadata from the public Fabric API host.
+3. Capture the routed Fabric home cluster from response headers.
+4. Exchange the bearer token for an MWC token.
+5. If the global token exchange returns "Tenant not authorized for cluster",
+   retry token exchange on the routed home cluster observed in step 3.
+6. Write a local token file plus non-secret Bash and PowerShell exports for
+   the dashboard poller and task lifecycle helpers.
+
+Usage:
+    python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \\
+      --tenant-id <tenant-guid> \\
+      --workspace-id <workspace-guid> \\
+      --lakehouse-id <lakehouse-guid> \\
+      --output-dir .dataprojects/auth
+
+Then source the generated env file:
+    source .dataprojects/auth/env.sh
+
+For PowerShell:
+    . .dataprojects/auth/env.ps1
+"""
 
 from __future__ import annotations
 
@@ -50,7 +75,7 @@ class TokenExchange:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tenant-id", required=True, help="Workspace home tenant ID for Azure CLI token acquisition.")
     parser.add_argument("--workspace-id", required=True, help="Fabric workspace object ID.")
     parser.add_argument("--lakehouse-id", required=True, help="Default Spark-session lakehouse object ID.")
@@ -191,11 +216,19 @@ def resolve_workspace_context(args: argparse.Namespace, fabric_api_host: str, be
     lakehouse_url = f"{fabric_api_host}/v1/workspaces/{args.workspace_id}/lakehouses/{args.lakehouse_id}"
     lakehouse_result = request_json(lakehouse_url, bearer, timeout=args.timeout)
     lakehouse = decode_json(lakehouse_result)
+
     home_cluster_uri = response_header(workspace_result, "home-cluster-uri") or response_header(
         lakehouse_result,
         "home-cluster-uri",
     )
-    return WorkspaceContext(workspace, lakehouse, capacity_id, home_cluster_uri, workspace_result, lakehouse_result)
+    return WorkspaceContext(
+        workspace=workspace,
+        lakehouse=lakehouse,
+        capacity_id=capacity_id,
+        home_cluster_uri=home_cluster_uri,
+        workspace_result=workspace_result,
+        lakehouse_result=lakehouse_result,
+    )
 
 
 def exchange_mwc_token(
@@ -217,6 +250,8 @@ def exchange_mwc_token(
         "artifactObjectIds": [args.lakehouse_id],
     }
 
+    token_result: HttpResult | None = None
+    token_base_used: str | None = None
     first_error: str | None = None
     for index, token_base in enumerate(token_bases):
         token_url = f"{token_base}/metadata/v201606/generatemwctoken"
@@ -229,7 +264,9 @@ def exchange_mwc_token(
             allow_http_error=True,
         )
         if 200 <= result.status < 300:
-            return TokenExchange(decode_json(result), result, token_base, fabric_api_host)
+            token_result = result
+            token_base_used = token_base
+            break
 
         error_message = token_error_message(result)
         if index == 0:
@@ -237,7 +274,15 @@ def exchange_mwc_token(
         if CLUSTER_AUTH_ERROR not in error_message or index + 1 >= len(token_bases):
             raise RuntimeError(f"generatemwctoken failed at {token_url}: HTTP {result.status}: {error_message}")
 
-    raise RuntimeError(first_error or "generatemwctoken did not return a token response")
+    if token_result is None or token_base_used is None:
+        raise RuntimeError(first_error or "generatemwctoken did not return a token response")
+
+    return TokenExchange(
+        token_data=decode_json(token_result),
+        token_result=token_result,
+        token_base_used=token_base_used,
+        global_token_base=fabric_api_host,
+    )
 
 
 def build_routing_payload(
@@ -254,7 +299,6 @@ def build_routing_payload(
     target_uri_host = token_data.get("TargetUriHost") or token_data.get("mwcTokenTargetUriHost")
     if not isinstance(target_uri_host, str) or not target_uri_host:
         raise RuntimeError("generatemwctoken response did not include TargetUriHost")
-
     sparkcore_host = normalize_base_url(target_uri_host)
     tasks_base = (
         f"{sparkcore_host}/webapi/capacities/{context.capacity_id}/workloads/SparkCore/"
