@@ -1,6 +1,6 @@
 ---
 name: project-osmos
-description: Use Project Osmos agents for Microsoft Fabric data engineering tasks that create or update notebooks, Spark code, Lakehouses, and OneLake resources. Triggers: "Project Osmos", "Fabric data engineering", "Spark Transform Notebook", "OneLake ETL", "Fabric Project Osmos".
+description: 'Use Project Osmos agents for Microsoft Fabric data engineering tasks that create or update notebooks, Spark code, Lakehouses, and OneLake resources. Triggers: "Project Osmos", "Fabric data engineering", "Spark Transform Notebook", "OneLake ETL", "Fabric Project Osmos".'
 ---
 
 # Project Osmos for Microsoft Fabric

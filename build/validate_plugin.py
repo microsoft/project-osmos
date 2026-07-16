@@ -18,6 +18,9 @@ MARKETPLACE_SYMLINKS = [
     (CLAUDE_MARKETPLACE_JSON, "../.github/plugin/marketplace.json"),
 ]
 SEMVER_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+FRONTMATTER_FIELD_PATTERN = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
+UNSAFE_PLAIN_SCALAR_PATTERN = re.compile(r":(?:[ \t]|$)")
+BLOCK_SCALAR_INDICATORS = {"|", "|-", "|+", ">", ">-", ">+"}
 FORBIDDEN_PATHS = [
     REPO_ROOT / "plugin.json",
     REPO_ROOT / "package.json",
@@ -72,6 +75,41 @@ def format_repo_path(path: Path) -> str:
         return str(path)
 
 
+def validate_skill_frontmatter(skill_path: Path) -> list[str]:
+    label = format_repo_path(skill_path)
+    try:
+        lines = skill_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return [f"{label} must be readable: {exc}"]
+
+    if not lines or lines[0] != "---":
+        return [f"{label} must start with YAML frontmatter"]
+
+    try:
+        frontmatter_end = lines.index("---", 1)
+    except ValueError:
+        return [f"{label} must close YAML frontmatter with ---"]
+
+    for line_number, line in enumerate(lines[1:frontmatter_end], start=2):
+        match = FRONTMATTER_FIELD_PATTERN.fullmatch(line)
+        if not match or match.group(1) != "description":
+            continue
+
+        value = match.group(2).strip()
+        if not value:
+            return [f"{label} line {line_number}: frontmatter description must not be empty"]
+        if value in BLOCK_SCALAR_INDICATORS or value.startswith(("'", '"')):
+            return []
+        if UNSAFE_PLAIN_SCALAR_PATTERN.search(value):
+            return [
+                f"{label} line {line_number}: frontmatter description contains a colon followed by "
+                "whitespace or the end of the value in an unquoted YAML scalar; quote the value or use a block scalar"
+            ]
+        return []
+
+    return [f"{label} must define a frontmatter description"]
+
+
 def validate_plugin_entry(marketplace_name: str, plugin: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     name = plugin.get("name", "project-osmos")
@@ -108,6 +146,8 @@ def validate_plugin_entry(marketplace_name: str, plugin: dict[str, Any]) -> list
             issues.append(f"[{marketplace_name}/{name}] missing skill directory: {format_repo_path(skill_dir)}")
         elif not (skill_dir / "SKILL.md").is_file():
             issues.append(f"[{marketplace_name}/{name}] missing SKILL.md: {format_repo_path(skill_dir / 'SKILL.md')}")
+        else:
+            issues.extend(validate_skill_frontmatter(skill_dir / "SKILL.md"))
 
     hooks_ref = plugin.get("hooks")
     if hooks_ref != "./hooks.json":
