@@ -1,9 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-"""Validate the Copilot CLI marketplace manifest for project-osmos."""
+"""Validate Project Osmos marketplace manifests and client-native hooks."""
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -14,9 +15,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKETPLACE_JSON = REPO_ROOT / ".github" / "plugin" / "marketplace.json"
 CLAUDE_MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-MARKETPLACE_SYMLINKS = [
-    (CLAUDE_MARKETPLACE_JSON, "../.github/plugin/marketplace.json"),
-]
+CODEX_MARKETPLACE_JSON = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
 SEMVER_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 FRONTMATTER_FIELD_PATTERN = re.compile(r"^([A-Za-z0-9_-]+):\s*(.*)$")
 UNSAFE_PLAIN_SCALAR_PATTERN = re.compile(r":(?:[ \t]|$)")
@@ -28,11 +27,53 @@ FORBIDDEN_PATHS = [
     REPO_ROOT / ".github" / "plugin" / "plugin.json",
     REPO_ROOT / ".claude-plugin" / "plugin.json",
     REPO_ROOT / ".codex-plugin",
+    REPO_ROOT / "hooks" / "hooks.json",
 ]
+COPILOT_BASH_COMMAND = (
+    'if [ "${PROJECT_OSMOS_UPDATE_HOOK:-}" = "1" ]; then exit 0; fi; '
+    "PROJECT_OSMOS_UPDATE_HOOK=1 copilot plugin marketplace update project-osmos >/dev/null 2>&1; "
+    "PROJECT_OSMOS_UPDATE_HOOK=1 copilot plugin update project-osmos@project-osmos >/dev/null 2>&1 || true"
+)
+COPILOT_POWERSHELL_COMMAND = (
+    "if ($env:PROJECT_OSMOS_UPDATE_HOOK -eq '1') { exit 0 }; "
+    "$env:PROJECT_OSMOS_UPDATE_HOOK = '1'; "
+    "copilot plugin marketplace update project-osmos *> $null; "
+    "copilot plugin update project-osmos@project-osmos *> $null; exit 0"
+)
+CLAUDE_UPDATE_COMMAND = (
+    'if [ "${PROJECT_OSMOS_CLAUDE_UPDATE_HOOK:-}" = "1" ]; then exit 0; fi; '
+    "command -v claude >/dev/null 2>&1 || exit 0; "
+    "PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin marketplace update project-osmos >/dev/null 2>&1 || true; "
+    "PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin update project-osmos@project-osmos >/dev/null 2>&1 || true"
+)
+CLAUDE_HOOKS = {
+    "SessionStart": [
+        {
+            "matcher": "startup|resume|clear",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": CLAUDE_UPDATE_COMMAND,
+                    "timeout": 120,
+                    "statusMessage": "Updating Project Osmos plugin",
+                }
+            ],
+        }
+    ]
+}
 
 
-def load_json(path: Path) -> dict[str, Any]:
+def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def first_plugin_entry(manifest: Any) -> dict[str, Any] | None:
+    if not isinstance(manifest, dict):
+        return None
+    plugins = manifest.get("plugins")
+    if not isinstance(plugins, list) or not plugins or not isinstance(plugins[0], dict):
+        return None
+    return plugins[0]
 
 
 def string_list(
@@ -73,6 +114,35 @@ def format_repo_path(path: Path) -> str:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def first_symlink_component(path: Path) -> Path | None:
+    current = REPO_ROOT
+    for part in path.relative_to(REPO_ROOT).parts:
+        current /= part
+        if current.is_symlink():
+            return current
+    return None
+
+
+def validate_manifest_paths() -> list[str]:
+    issues: list[str] = []
+    for label, path in (
+        ("Copilot", MARKETPLACE_JSON),
+        ("Claude", CLAUDE_MARKETPLACE_JSON),
+        ("Codex", CODEX_MARKETPLACE_JSON),
+    ):
+        symlink_component = first_symlink_component(path)
+        if symlink_component is not None:
+            issues.append(
+                f"{format_repo_path(path)} must be a regular JSON file with no symlink path components; "
+                f"{format_repo_path(symlink_component)} is a symlink and can become plain text on Windows"
+            )
+        elif not path.exists():
+            issues.append(f"missing {label} marketplace manifest: {format_repo_path(path)}")
+        elif not path.is_file():
+            issues.append(f"{format_repo_path(path)} must be a regular JSON file")
+    return issues
 
 
 def validate_skill_frontmatter(skill_path: Path) -> list[str]:
@@ -181,6 +251,11 @@ def validate_hooks_file(marketplace_name: str, plugin_name: str, hooks_path: Pat
     except (OSError, json.JSONDecodeError) as exc:
         return [f"{prefix} must be valid JSON: {exc}"]
 
+    if not isinstance(hooks_config, dict):
+        return [f"{prefix} must contain a JSON object"]
+
+    if set(hooks_config) != {"version", "hooks"}:
+        issues.append(f"{prefix} top level must contain only version and hooks")
     if hooks_config.get("version") != 1:
         issues.append(f"{prefix} version must be 1")
 
@@ -188,6 +263,8 @@ def validate_hooks_file(marketplace_name: str, plugin_name: str, hooks_path: Pat
     if not isinstance(hooks, dict):
         issues.append(f"{prefix} hooks must be an object")
         return issues
+    if set(hooks) != {"sessionStart"}:
+        issues.append(f"{prefix} hooks must contain only the Copilot sessionStart event")
 
     session_start = hooks.get("sessionStart")
     if not isinstance(session_start, list) or len(session_start) != 1:
@@ -205,57 +282,15 @@ def validate_hooks_file(marketplace_name: str, plugin_name: str, hooks_path: Pat
         issues.append(f"{prefix} sessionStart hook cwd must be .")
     if hook.get("timeoutSec") != 120:
         issues.append(f"{prefix} sessionStart hook timeoutSec must be 120")
+    if set(hook) != {"type", "bash", "powershell", "cwd", "timeoutSec", "comment"}:
+        issues.append(f"{prefix} sessionStart hook fields do not match the Copilot command schema")
+    if hook.get("comment") != "Updating Project Osmos plugin":
+        issues.append(f"{prefix} sessionStart hook comment must be Updating Project Osmos plugin")
 
-    for shell_key in ("bash", "powershell"):
-        command = hook.get(shell_key)
-        if not isinstance(command, str) or not command:
-            issues.append(f"{prefix} sessionStart hook must define {shell_key}")
-            continue
-        for required in (
-            "PROJECT_OSMOS_UPDATE_HOOK",
-            "copilot plugin marketplace update project-osmos",
-            "copilot plugin update project-osmos@project-osmos",
-        ):
-            if required not in command:
-                issues.append(f"{prefix} {shell_key} command must include {required!r}")
-
-    claude_session_start = hooks.get("SessionStart")
-    if not isinstance(claude_session_start, list) or len(claude_session_start) != 1:
-        issues.append(f"{prefix} hooks.SessionStart must contain exactly one Claude Code auto-update hook")
-        return issues
-
-    claude_group = claude_session_start[0]
-    if not isinstance(claude_group, dict):
-        issues.append(f"{prefix} SessionStart hook group must be an object")
-        return issues
-    if claude_group.get("matcher") != "startup|resume|clear":
-        issues.append(f"{prefix} SessionStart matcher must be startup|resume|clear")
-
-    claude_hooks = claude_group.get("hooks")
-    if not isinstance(claude_hooks, list) or len(claude_hooks) != 1:
-        issues.append(f"{prefix} SessionStart hook group must contain exactly one command hook")
-        return issues
-
-    claude_hook = claude_hooks[0]
-    if not isinstance(claude_hook, dict):
-        issues.append(f"{prefix} SessionStart command hook must be an object")
-        return issues
-    if claude_hook.get("type") != "command":
-        issues.append(f"{prefix} SessionStart command hook type must be command")
-    if claude_hook.get("timeout") != 120:
-        issues.append(f"{prefix} SessionStart command hook timeout must be 120")
-
-    claude_command = claude_hook.get("command")
-    if not isinstance(claude_command, str) or not claude_command:
-        issues.append(f"{prefix} SessionStart command hook must define command")
-        return issues
-    for required in (
-        "PROJECT_OSMOS_CLAUDE_UPDATE_HOOK",
-        "claude plugin marketplace update project-osmos",
-        "claude plugin update project-osmos@project-osmos",
-    ):
-        if required not in claude_command:
-            issues.append(f"{prefix} SessionStart command must include {required!r}")
+    if hook.get("bash") != COPILOT_BASH_COMMAND:
+        issues.append(f"{prefix} bash command must match the Copilot auto-update command")
+    if hook.get("powershell") != COPILOT_POWERSHELL_COMMAND:
+        issues.append(f"{prefix} powershell command must match the Copilot auto-update command")
 
     return issues
 
@@ -307,42 +342,92 @@ def validate_forbidden_paths() -> list[str]:
     for path in FORBIDDEN_PATHS:
         if path.exists():
             issues.append(f"remove unsupported plugin artifact: {format_repo_path(path)}")
+    for path in REPO_ROOT.rglob("plugin.json"):
+        if ".git" not in path.parts and path not in FORBIDDEN_PATHS:
+            issues.append(f"remove unsupported plugin artifact: {format_repo_path(path)}")
     return issues
 
 
-def validate_marketplace_symlinks() -> list[str]:
+def validate_native_marketplace_manifests(marketplace: dict[str, Any]) -> list[str]:
     issues: list[str] = []
-    for path, expected_target in MARKETPLACE_SYMLINKS:
-        if not path.is_symlink():
-            issues.append(f"{format_repo_path(path)} must be a symlink to {expected_target}")
+
+    claude_marketplace = copy.deepcopy(marketplace)
+    claude_plugin = first_plugin_entry(claude_marketplace)
+    if claude_plugin is not None:
+        claude_plugin["hooks"] = CLAUDE_HOOKS
+
+    codex_marketplace = copy.deepcopy(marketplace)
+    codex_plugin = first_plugin_entry(codex_marketplace)
+    if codex_plugin is not None:
+        codex_plugin.pop("hooks", None)
+
+    for label, path, expected in (
+        ("Claude", CLAUDE_MARKETPLACE_JSON, claude_marketplace),
+        ("Codex", CODEX_MARKETPLACE_JSON, codex_marketplace),
+    ):
+        try:
+            actual = load_json(path)
+        except (OSError, json.JSONDecodeError) as exc:
+            issues.append(f"{format_repo_path(path)} must be valid JSON: {exc}")
             continue
-        actual_target = path.readlink()
-        if actual_target.as_posix() != expected_target:
+        actual_plugin = first_plugin_entry(actual)
+        actual_hooks = actual_plugin.get("hooks") if actual_plugin is not None else None
+        if label == "Claude":
+            if isinstance(actual_hooks, str):
+                issues.append(
+                    f"{format_repo_path(path)} plugins[0].hooks must be an inline Claude hooks object, "
+                    "not a file path"
+                )
+            elif actual_hooks != CLAUDE_HOOKS:
+                issues.append(
+                    f"{format_repo_path(path)} plugins[0].hooks must exactly match the native Claude "
+                    "SessionStart auto-update hook"
+                )
+        if label == "Codex":
+            if actual_plugin is not None and "hooks" in actual_plugin:
+                issues.append(
+                    f"{format_repo_path(path)} must not define plugins[0].hooks or reference hooks.json; "
+                    "Codex does not support this repository's Copilot hooks.json schema and updates Git "
+                    "marketplaces natively"
+                )
+        if actual != expected:
             issues.append(
-                f"{format_repo_path(path)} must point to {expected_target}, not {actual_target.as_posix()}"
+                f"{format_repo_path(path)} must stay synchronized with .github/plugin/marketplace.json"
+                + (
+                    " after removing only plugins[0].hooks for Codex"
+                    if label == "Codex"
+                    else " after replacing only plugins[0].hooks with the native Claude inline hook"
+                )
             )
+
     return issues
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="accepted for compatibility; validation is always read-only")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify all marketplace manifests are regular files and satisfy the synchronization contract",
+    )
     parser.parse_args()
 
-    if not MARKETPLACE_JSON.exists():
-        print("No marketplace manifest found at .github/plugin/marketplace.json", file=sys.stderr)
-        return 1
-    if not CLAUDE_MARKETPLACE_JSON.exists():
-        print("No Claude marketplace manifest found at .claude-plugin/marketplace.json", file=sys.stderr)
+    path_issues = validate_manifest_paths()
+    if path_issues:
+        for issue in path_issues:
+            print(issue, file=sys.stderr)
         return 1
     try:
         marketplace = load_json(MARKETPLACE_JSON)
     except (OSError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    if not isinstance(marketplace, dict):
+        print(f"{format_repo_path(MARKETPLACE_JSON)} must contain a JSON object", file=sys.stderr)
+        return 1
 
     issues = validate_marketplace(marketplace)
-    issues.extend(validate_marketplace_symlinks())
+    issues.extend(validate_native_marketplace_manifests(marketplace))
     issues.extend(validate_forbidden_paths())
 
     if issues:
@@ -350,7 +435,7 @@ def main() -> int:
             print(issue, file=sys.stderr)
         return 1
 
-    print("Marketplace manifests are valid.")
+    print("Marketplace manifests are valid and synchronized.")
     return 0
 
 

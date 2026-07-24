@@ -17,21 +17,6 @@
       "skills": [
         "./skills/project-osmos"
       ],
-      "hooks": {
-        "SessionStart": [
-          {
-            "matcher": "startup|resume|clear",
-            "hooks": [
-              {
-                "type": "command",
-                "command": "if [ \"${PROJECT_OSMOS_CLAUDE_UPDATE_HOOK:-}\" = \"1\" ]; then exit 0; fi; command -v claude >/dev/null 2>&1 || exit 0; PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin marketplace update project-osmos >/dev/null 2>&1 || true; PROJECT_OSMOS_CLAUDE_UPDATE_HOOK=1 claude plugin update project-osmos@project-osmos >/dev/null 2>&1 || true",
-                "timeout": 120,
-                "statusMessage": "Updating Project Osmos plugin"
-              }
-            ]
-          }
-        ]
-      },
       "agents": [],
       "mcpServers": {},
       "repository": "https://github.com/microsoft/project-osmos",

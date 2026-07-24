@@ -226,8 +226,9 @@ value is `null`:
 - `task.lakehouse_name` — fetched with `GET
   /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}`, field
   `displayName`. Never blank, never `(unknown)`, never the GUID.
+
 - `task.created_at` — ISO 8601, the moment the skill called `PUT
-  /tasks/{taskId}`.
+  /{taskId}`.
 - `task.started_at` — ISO 8601 if the task is already `Running`,
   otherwise `null`.
 - `task.last_polled_at` — ISO 8601 of the seed write itself; the
@@ -313,6 +314,7 @@ and continues. A failed open must never block the run.
 
 The skill must also print the dashboard URL in chat so users who closed
 the tab or are on a remote machine can reach it.
+
 
 ## Refresh contract
 

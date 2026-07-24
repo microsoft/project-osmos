@@ -1,211 +1,174 @@
-# Project Osmos for Fabric - Copilot plugin
+# Project Osmos for Microsoft Fabric
 
-Agent plugin to use **Project Osmos** in Microsoft Fabric from your favorite AI coding assistant.
-
-This repository ships the `project-osmos` domain skill plus session-start hooks that keep the installed plugin fresh in GitHub Copilot CLI and Claude Code.
+Install Project Osmos in GitHub Copilot CLI, Codex, or Claude Code and use natural language to run data engineering tasks in Microsoft Fabric.
 
 ## What Project Osmos does
 
-Project Osmos is Fabric's AI-powered data engineering workflow. You describe a data engineering task in natural language (for example, *"join Orders with Customers and compute monthly revenue"*, or set up a medallion architecture that flows data from **bronze → silver → gold**) and an AI agent in Microsoft Fabric autonomously:
+Project Osmos is an AI-powered data engineering workflow for Fabric. Describe the outcome you want, and the agent can:
 
-- Spins up a Spark session in your workspace.
-- Figures out how to meet the objectives you lay out in the task.
-- Creates/updates tables.
-- Creates/updates and tests notebooks that it generates to transform data.
+- Explore data in your Lakehouse.
+- Create and test Fabric notebooks.
+- Clean, join, aggregate, and validate data.
+- Create or update Delta tables and workspace artifacts.
+- Run longer workflows while you monitor progress from a local dashboard.
 
+The plugin on your machine starts and monitors the task. Agent reasoning, Spark execution, and OneLake data access run inside Microsoft Fabric.
 
-The `project-osmos` skill starts a Project Osmos task from Copilot on your local machine. It creates a SparkCore task, posts your instruction as a message, triggers `POST /run`, then spawns a local dashboard poller to track progress. The heavy lifting — LLM reasoning, Spark execution on a Spark cluster, OneLake reads and writes — happens server-side inside Fabric.
+## Before you start
 
-In short, the local skill is a thin control plane that drives the remote agent lifecycle; the agent itself runs entirely within Fabric's compute and storage boundary.
+You need:
 
-## Audience
-
-Users with Project Osmos access who want to automate Fabric data engineering workflows.
-
-
-## Prerequisites
-
-| Requirement | How to get it |
+| Requirement | Details |
 | --- | --- |
-| GitHub Copilot CLI | macOS: `brew install copilot-cli` &nbsp;·&nbsp; cross-platform: `npm install -g @github/copilot` |
-| Azure CLI | macOS: `brew install azure-cli` &nbsp;·&nbsp; other platforms: see the [official install docs](https://learn.microsoft.com/cli/azure/install-azure-cli). |
-| Fabric workspace with capacity | A workspace that contains a lakehouse. Open the Lakehouse in Fabric and copy the full browser URL. |
-| Fabric Copilot setting | The Fabric setting **"User can use Copilot and other features powered by Azure OpenAI"** must be enabled for either the tenant or the target workspace. |
-| Permissions | Contributor or higher on the target workspace. |
+| Project Osmos access | Project Osmos must be enabled for your account. |
+| Fabric workspace | The workspace must be assigned to Fabric capacity and contain a Lakehouse. |
+| Workspace permissions | Contributor or higher on the target workspace. |
+| Fabric Copilot setting | **User can use Copilot and other features powered by Azure OpenAI** must be enabled for the tenant or workspace. |
+| Azure CLI | Install Azure CLI and sign in with an identity that can access the workspace. |
+| AI coding client | Install GitHub Copilot CLI, Codex, or Claude Code. |
 
 ## Install
 
-Choose the command style that matches where you want to install the plugin. GitHub README files do not render true interactive tabs, so these sections use collapsible groups.
+Use the commands for your preferred client.
 
-<details open>
-<summary><strong>Copilot CLI Install Terminal</strong></summary>
-
-Run these commands from your shell:
+### GitHub Copilot CLI
 
 ```bash
 copilot plugin marketplace add microsoft/project-osmos
 copilot plugin install project-osmos@project-osmos
 ```
 
-</details>
-
-<details>
-<summary><strong>Codex Install Terminal</strong></summary>
-
-Run these commands from your shell:
+### Codex
 
 ```bash
 codex plugin marketplace add microsoft/project-osmos
 codex plugin add project-osmos@project-osmos
 ```
 
-</details>
-
-<details>
-<summary><strong>Claude Code Install Terminal</strong></summary>
-
-Run these commands from your shell:
+### Claude Code
 
 ```bash
 claude plugin marketplace add microsoft/project-osmos
 claude plugin install project-osmos@project-osmos
 ```
 
-If Claude Code is already running, restart it or run `/reload-plugins`.
+Restart the client after the first installation. In Claude Code, you can instead run `/reload-plugins`.
 
-</details>
-
-The marketplace manifest lives at `.github/plugin/marketplace.json`; its single plugin entry uses `source: "./"`, references canonical skills under `./skills/`, and ships `hooks.json` for automatic session-start updates. `.claude-plugin/marketplace.json` is a symlink to the same manifest for Claude Code plugin discovery.
-
-After installation, the `project-osmos` skill is available to the client you installed it into and responds to natural-language prompts that mention Project Osmos, Fabric data engineering, Spark Transform Notebook, or OneLake ETL.
-
-
-For contribution expectations, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Create your first Project Osmos task
+## Create your first task
 
 ### 1. Sign in to Azure
 
-Open your favorite terminal and sign in to Azure. The skill uses your Azure CLI identity to call Fabric APIs.
-
 ```bash
 az login
-```
-
-Confirm the expected tenant and account:
-
-```bash
 az account show
 ```
 
-### 2. Launch GitHub Copilot CLI
+Confirm that `az account show` displays the expected account and tenant.
 
-```bash
-copilot
-```
+### 2. Start your client
 
-### 3. Ask Copilot to start Project Osmos
+| Client | Command |
+| --- | --- |
+| GitHub Copilot CLI | `copilot` |
+| Codex | `codex` |
+| Claude Code | `claude` |
 
-Type a prompt inside Copilot CLI that mentions Project Osmos. The skill will ask for the Fabric Lakehouse browser URL first, parse the workspace ID and default Spark-session Lakehouse ID, then ask for your task instructions.
+### 3. Ask for Project Osmos
 
-Copilot CLI prompt:
+Use a prompt that names Project Osmos and describes the goal:
 
 ```text
 Use Project Osmos to transform data in my Fabric lakehouse.
 ```
 
-Provide a clear, full data engineering instruction. A simple example:
+The skill asks for:
+
+1. The full browser URL of your Fabric Lakehouse.
+2. Your complete data engineering instruction.
+3. Any optional constraints or additional context.
+4. Confirmation of the recommended operating settings before the run starts.
+
+### 4. Describe the outcome
+
+Be specific about source data, transformations, outputs, and validation. For example:
 
 ```text
-create a table called "Test-Sales-Data" with fields for CustomerID, TransactionID, Amount and Date. Then create a folder in the workspace called sales-sheets and put a sample CSV file in it with data that aligns with Test-Sales-Data. Finally create a notebook that ingests data from the CSV file to the table.
+Load Orders and Customers from my lakehouse, remove Orders rows with missing
+customer IDs, join the tables, calculate monthly revenue by customer segment,
+write the result as a Delta table, and validate the source and output row counts.
 ```
 
-### 4. Review operational intake
+Another example:
 
-The skill classifies the task, recommends operational constraints, and asks you to accept or adjust them before it starts the run. Those constraints are appended to the instruction sent to the remote agent.
+```text
+Create a sales sample CSV in a workspace folder, create a matching Delta table,
+and build and test a notebook that ingests the CSV into the table.
+```
 
-### 5. Wait for completion — or walk away
+### 5. Monitor the run
 
-Project Osmos executes inside Fabric. Depending on task complexity and current load this can take **up to a day**. The skill prints a run card with the task ID and local dashboard path, then spawns a detached poller that writes `./.dataprojects/<task-id>/state.json`, `state.js`, and `poller.log`. You can safely close the terminal or shut your machine down — the task keeps running in Fabric.
+Project Osmos runs in Fabric and complex tasks can take up to a day. After the task starts, the plugin displays the task ID and creates a local dashboard under:
 
-When you come back, resume the same conversation:
+```text
+./.dataprojects/<task-id>/
+```
+
+You can close the terminal or shut down your machine without stopping the Fabric task. When you return, reopen your client and ask it to resume the existing Project Osmos task. Include the task ID if the client cannot identify the previous run.
+
+## Update the plugin
+
+Copilot CLI and Claude Code include a startup update check. Codex updates configured Git marketplaces in the background. You can also update manually.
+
+### GitHub Copilot CLI
 
 ```bash
-copilot --resume
-```
-
-## What the skill always asks for
-
-1. Fabric Lakehouse browser URL.
-2. Full data engineering task instruction.
-3. Optional extra guidance from the "Anything else I should know?" prompt.
-
-Another example instruction you can adapt:
-
-```text
-Use Project Osmos to load the Orders table from my lakehouse, remove rows with missing customer IDs, join to Customers, write a monthly segment revenue Delta table, and validate row counts.
-```
-
-## Common issues
-
-| Issue | What to do |
-| --- | --- |
-| Skill is not listed in `/skills` | Skill discovery may run before a first-time install completes. Re-run the marketplace install step from [Install](#install), then restart Copilot CLI. |
-| Azure CLI token check fails | Run `az login`, confirm the expected tenant and account with `az account show`, then retry. |
-| Capacity lookup fails | Confirm the workspace is assigned to a Fabric capacity and your Azure CLI identity can read workspace metadata. |
-| Workspace lookup fails | Confirm the Lakehouse browser URL is correct and that your Azure CLI identity has access to the workspace. |
-| Workspace has no capacity | Use a workspace already assigned to a Fabric capacity before running Project Osmos. |
-| Lakehouse lookup or task creation fails | Confirm the Lakehouse URL points to a lakehouse in the same workspace being resolved. |
-| `POST /run` returns an instruction-related error | The task was created without the instruction. Ask Copilot to recreate or update the task with the full instruction field before running. |
-| Task remains running for several minutes | Keep polling. Spark session acquisition and agent planning can take several minutes. |
-| Error: *Run failed while executing statements on the Spark session. Please retry.* | The dashboard poller auto-retries this documented transient on the same task ID. If the poller has exited, ask Copilot to read `terminal.json` before respawning it. |
-
-## Privacy and telemetry
-
-See [PRIVACY.md](PRIVACY.md) for the standalone privacy and telemetry notice.
-
-
-## Updating the plugin
-
-The installed plugin ships a Copilot CLI `sessionStart` hook that refreshes the `project-osmos` marketplace catalog and runs plugin update at the start of Copilot CLI sessions:
-
-```text
 copilot plugin marketplace update project-osmos
 copilot plugin update project-osmos@project-osmos
 ```
 
-The hook is fail-open: update failures are ignored so they do not block normal Copilot sessions after the hook returns. Updates affect subsequent sessions because skill content is loaded before the session-start hook runs. To update manually, run `/plugin update project-osmos@project-osmos` in Copilot CLI or `copilot plugin update project-osmos@project-osmos` from a shell.
+### Codex
 
-For Claude Code, the same `hooks.json` also ships a `SessionStart` hook for `startup`, `resume`, and `clear` events. It runs `claude plugin marketplace update project-osmos` and `claude plugin update project-osmos@project-osmos`; Claude Code plugin updates may require restarting Claude Code or running `/reload-plugins`.
+```bash
+codex plugin marketplace upgrade project-osmos
+```
 
-## Repository layout
+### Claude Code
 
-| Path | Purpose |
+```bash
+claude plugin marketplace update project-osmos
+claude plugin update project-osmos@project-osmos
+```
+
+Restart the client after an update so the new skill content is loaded.
+
+## Troubleshooting
+
+| Issue | What to do |
 | --- | --- |
-| `.github/plugin/marketplace.json` | Canonical Copilot CLI marketplace manifest for `project-osmos@project-osmos`. |
-| `.claude-plugin/marketplace.json` | Symlink to the canonical manifest for Claude marketplace discovery. |
-| `hooks.json` | Plugin hook configuration that refreshes the marketplace catalog and updates `project-osmos` at session start for Copilot CLI and Claude Code. |
-| `skills/` | Canonical Agent Skills source referenced by the marketplace plugin entry as `./skills/<skill-name>`. |
-| `build/validate_plugin.py` | Validates marketplace metadata, plugin references, and accidental nested plugin files or trees. |
-| `build/check_version_bump.py` | Validates PR marketplace and plugin versions against the base branch. |
-| `.github/workflows/` | Public plugin validation, version, release, and safety-review automation. |
+| Project Osmos is not available after installation | Restart the client, then run the install commands again and check for an installation error. |
+| Azure authentication fails | Run `az login`, then verify the expected account and tenant with `az account show`. |
+| Workspace or capacity lookup fails | Confirm the Lakehouse URL is correct, the workspace has Fabric capacity, and your Azure identity can access it. |
+| Lakehouse lookup or task creation fails | Open the Lakehouse in Fabric and copy the complete browser URL again. |
+| The task runs for a long time | Spark startup, planning, and complex transformations can take time. Continue monitoring the existing task rather than creating another one. |
+| The local dashboard or poller stopped | Resume the existing task with the same task ID. Do not restart intake or create a duplicate task. |
+| The installed plugin appears outdated | Run the manual update command for your client, restart it, and retry. |
 
+## Repository contents
 
-The repository root is the marketplace repository and plugin source. Keep plugin composition in `.github/plugin/marketplace.json`, keep `.claude-plugin/marketplace.json` as a symlink to it, keep Copilot CLI and Claude Code plugin hooks in `hooks.json`, and keep skill source under `skills/`.
+- `skills/project-osmos/` contains the Project Osmos skill and operational references.
+- The client marketplace manifests make the same plugin available to Copilot CLI, Codex, and Claude Code.
+- Copilot CLI uses `hooks.json` for its startup update check; Claude Code carries its native startup hook in its marketplace manifest.
+- `.github/workflows/` validates and publishes the plugin.
 
-`build/validate_plugin.py` is a read-only repository maintenance helper, not a runtime dependency for users. It verifies the marketplace manifests, checks referenced skills exist, and fails if root `plugin.json`, `package.json`, or unsupported nested plugin manifests or plugin trees are reintroduced.
+Maintainer and contribution details are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Privacy, support, and security
 
-## Legal notices
+- Read [PRIVACY.md](PRIVACY.md) for privacy and telemetry information.
+- For general feedback, contact [project-osmos@microsoft.com](mailto:project-osmos@microsoft.com).
+- Report security vulnerabilities through [SECURITY.md](SECURITY.md).
+- Do not post tokens, tenant details, workspace or Lakehouse IDs, certificate material, or private data in issues or logs.
 
-This project follows the [Microsoft Open Source Code of Conduct](CODE_OF_CONDUCT.md). Contributions are subject to the Microsoft Contributor License Agreement.
+This project is licensed under the [MIT License](LICENSE) and follows the [Microsoft Open Source Code of Conduct](CODE_OF_CONDUCT.md).
 
-Microsoft, Microsoft Fabric, GitHub Copilot, OneLake, Azure, and other Microsoft products and services may be trademarks or registered trademarks of Microsoft Corporation in the United States and other countries. This project does not grant rights to use Microsoft trademarks.
-
-Public releases or changes involving privacy, telemetry, machine learning, AI, models, datasets, or service-side behavior may require additional approval before publication.
-
-
-## Contributing and security
-
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Do not include bearer or service tokens, tenant secrets, certificate material, workspace-private data, or personal paths in issues, PRs, logs, or skill content.
+Microsoft, Microsoft Fabric, GitHub Copilot, OneLake, and Azure may be trademarks or registered trademarks of Microsoft Corporation. See the [Microsoft Trademark and Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks).

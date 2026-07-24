@@ -1190,7 +1190,7 @@ Licensed under the MIT license.
         var feedItems = filtered.length ? filtered.map(function (m) {
           var repeats = m.repeats && m.repeats > 1 ? m.repeats : 0;
           var metaChildren = [
-            el("span", { class: "seq" }, ["#" + (m.seq != null ? m.seq : "?")]),
+            el("span", { class: "seq" }, ["#" + (m.seq != null ? (m.seq + 1) : "?")]),
             el("span", { class: "role-badge" }, [ROLE_LABEL[m.role] || m.role || "assistant"]),
             el("span", null, [fmtTs(m.ts)])
           ];
