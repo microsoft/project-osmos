@@ -5,14 +5,14 @@
     "email": "project-osmos@microsoft.com"
   },
   "metadata": {
-    "description": "Project Osmos marketplace for Microsoft Fabric — a plugin that solves complex data engineering workflows with a long-running autonomous agent.",
-    "version": "0.4.9"
+    "description": "Project Osmos marketplace for Microsoft Fabric \u2014 a plugin that solves complex data engineering workflows with a long-running autonomous agent.",
+    "version": "0.4.11"
   },
   "plugins": [
     {
       "name": "project-osmos",
-      "description": "Project Osmos plugin for Microsoft Fabric — solves complex data engineering workflows with a long-running autonomous agent.",
-      "version": "0.4.9",
+      "description": "Project Osmos plugin for Microsoft Fabric \u2014 solves complex data engineering workflows with a long-running autonomous agent.",
+      "version": "0.4.11",
       "source": "./",
       "skills": [
         "./skills/project-osmos"

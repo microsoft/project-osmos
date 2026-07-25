@@ -27,6 +27,7 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
 8. **Seed the dashboard.** Create `./.dataprojects/<task-id>/`, copy `assets/dashboard.html`, and seed `state.js` / `state.json` exactly from [Status dashboard](references/dashboard.md). Use snake_case; never persist tokens, bearer headers, tenant credentials, or camelCase API keys.
 9. **Print the run card.** As soon as the run starts, print this table (real markdown table, not a code block):
 
+
    | Field | Value |
    | --- | --- |
    | Task ID | `<task-id>` |
@@ -44,6 +45,7 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
 
 - Hand off the user's full scope as a single Osmos task. Do not decompose, stage, or split the work into multiple tasks — even a large outcome like "build me a medallion architecture" should be sent in full as one `instruction`. Osmos does its own planning, search, and sequencing; pre-chopping the work degrades results.
 - Repetitive-looking discovery passes are expected, not a stuck loop. Osmos runs many experiments — trying multiple approaches, revisiting steps, and comparing results to converge on the best one — so it takes time and progress can look repetitive. Do not assume it is looping, and do not cancel, re-run, or recreate the task on that basis. Let it work; relay progress and keep polling.
+- Before canceling or deleting a task, follow the confirmation gates in [Task lifecycle](references/task-lifecycle.md). Delete is unrecoverable and requires exact task ID re-entry; cancel only stops the current run and requires yes/no confirmation.
 - The Lakehouse ID is only the Spark session's default lakehouse. It is not automatically a source, destination, or scope boundary. Label it "Default lakehouse for the Spark session".
 - Poll messages for progress; task status alone is not enough.
 - Let the poller own message de-duplication, `tool` / `system` filtering, token refresh, terminal markers, and the documented Spark statement transient retry. Do not manually `POST /run` for that transient while the poller is alive.

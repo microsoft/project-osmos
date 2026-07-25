@@ -22,6 +22,34 @@ export BASE="https://{sparkcore-workload-host}/webapi/capacities/{capacityId}/wo
 | `POST` | `/{taskId}/run` | Start the AI agent |
 | `POST` | `/{taskId}/cancel` | Cancel a running task |
 
+## Cancel and delete safety gates
+
+Do not treat cancel and delete as synonyms. Use these confirmation gates before calling either endpoint.
+
+### Delete a task
+
+`DELETE /{taskId}` is unrecoverable. Before deleting, warn the user:
+
+```text
+Deleting this Osmos task is unrecoverable. This removes the task and its conversation from the service. Do you absolutely want to delete it?
+
+To continue, enter the exact task ID: <task-id>
+```
+
+Proceed only if the user re-enters the exact task ID. If the entered value differs in any way, do not call `DELETE`; report that deletion was not confirmed.
+
+### Cancel the current run
+
+`POST /{taskId}/cancel` cancels only the current run. The task is not permanently lost, and the user can come back later and continue the same task with new instructions. Before canceling, ask for yes/no confirmation:
+
+```text
+Canceling this Osmos task stops the current run only. The task and its history remain available, and you can continue it later with new instructions.
+
+Are you sure you want to cancel the current run? Reply yes or no.
+```
+
+Proceed only on an explicit yes. Do not require task ID re-entry for cancel, because the action is recoverable.
+
 ## Create task
 
 Generate a UUID for `taskId`. Include the full user instruction; the agent reads it during run.

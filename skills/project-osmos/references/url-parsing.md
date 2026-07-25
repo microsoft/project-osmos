@@ -101,3 +101,4 @@ Parser return:
 ```
 
 Use this inline parser in the agent's intake step; no separate script is required. If `lakehouse_id` is `None` or the host is unsupported, do not proceed to auth or API calls; prompt for a complete Lakehouse URL from the public Fabric portal.
+

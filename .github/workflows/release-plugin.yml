@@ -22,8 +22,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate marketplace manifests
-        run: python build/validate_plugin.py
+      - name: Verify all marketplace manifests are synchronized
+        run: python build/validate_plugin.py --check
 
       - name: Read marketplace version
         id: version

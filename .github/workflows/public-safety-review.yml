@@ -6,9 +6,66 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
+  validate-marketplace-sync:
+    name: Public marketplace synchronization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify all marketplace manifests are synchronized
+        run: python build/validate_plugin.py --check
+      - name: Verify public content and installation README
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          grep -F "microsoft/project-osmos" README.md >/dev/null
+
+          controller_denylist=".github/""public/denylist.txt"
+          denylist="$RUNNER_TEMP/public-denylist.txt"
+          patterns="$RUNNER_TEMP/public-denylist-patterns.txt"
+          git fetch --no-tags --depth=1 origin main
+          git show "FETCH_HEAD:${controller_denylist}" >"$denylist"
+          grep -Ev '^[[:space:]]*($|#)' "$denylist" >"$patterns" || true
+
+          if [ -s "$patterns" ]; then
+            if matches="$(git grep -I -n -i -E -f "$patterns" -- .)"; then
+              echo "::error::Denylisted content remains in the public tree."
+              printf '%s\n' "$matches"
+              exit 1
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                echo "::error::Public denylist scan failed with status ${status}."
+                exit "$status"
+              fi
+            fi
+          fi
+
+          internal_open="<""internal>"
+          internal_close="</""internal>"
+          for marker in "$internal_open" "$internal_close"; do
+            if matches="$(git grep -I -n -i -F "$marker" -- .)"; then
+              echo "::error::Internal block delimiters remain in the public tree."
+              printf '%s\n' "$matches"
+              exit 1
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                echo "::error::Internal marker scan failed with status ${status}."
+                exit "$status"
+              fi
+            fi
+          done
+
   request-ai-review:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
@@ -29,4 +86,3 @@ jobs:
             } catch (error) {
               core.warning(`Could not request Copilot review: ${error.message}`);
             }
-
