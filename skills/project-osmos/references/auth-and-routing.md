@@ -1,6 +1,10 @@
 # Authentication and route construction
 
-Build the direct SparkCore task route after parsing and confirming the user's Lakehouse browser URL.
+Build the direct SparkCore task route after resolving workspace and Lakehouse IDs from Fabric page context, Microsoft Fabric Skills discovery, or a validated Lakehouse browser URL.
+
+## Optional resource tenant override
+
+Use the current Azure CLI session by default. Do not ask for a tenant ID before attempting authentication. If the user already supplied the Microsoft Entra tenant ID that owns the workspace, pass it explicitly; guest users may need this resource-tenant override when their current session is in their home tenant. Ask for the resource tenant only when authentication or workspace lookup shows that the current session cannot access the target tenant.
 
 ## Public Fabric route
 
@@ -17,8 +21,8 @@ Public hosts:
 
 ### Token and route steps
 
-1. Authenticate Azure CLI **for the same tenant the workspace's capacity lives in**: `az login --tenant <tenant-id>`. Do not rely on the default subscription from `az account show`; `generatemwctoken` is gated by the workspace's home tenant, and a token from a different tenant returns a silent `HTTP 403` (empty body).
-2. Get a Power BI bearer token for that tenant: `az account get-access-token --tenant <tenant-id> --resource https://analysis.windows.net/powerbi/api`.
+1. Use the current Azure CLI session. If no session is available, run `az login --allow-no-subscriptions`. For a supplied resource-tenant override, run `az login --tenant <resource-tenant-id> --allow-no-subscriptions`.
+2. Get a Power BI bearer token with `az account get-access-token --resource https://analysis.windows.net/powerbi/api`. Add `--tenant <resource-tenant-id>` only when an override was supplied.
 3. Call the workspace metadata endpoint and capture the API `capacityId` field. Use it as the route/token capacity ID, and persist it in dashboard state as `capacity_id`.
 4. Call the public Fabric `generatemwctoken` endpoint with:
    - `capacityObjectId`
@@ -35,21 +39,25 @@ The helpers write `routing.json`, a private `mwc-token` file, `env.sh` for Bash,
 
 ```bash
 python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \
-  --tenant-id <tenant-id> \
   --workspace-id <workspace-id> \
   --lakehouse-id <lakehouse-id> \
+  --fabric-api-host <selected-fabric-api-host> \
   --output-dir .dataprojects/auth
 source .dataprojects/auth/env.sh
 ```
 
+For a guest or cross-tenant workspace, add `--resource-tenant-id <resource-tenant-id>`.
+
 ```powershell
 pwsh -NoProfile -File skills/project-osmos/scripts/resolve-auth-and-routing.ps1 `
-  -TenantId <tenant-id> `
   -WorkspaceId <workspace-id> `
   -LakehouseId <lakehouse-id> `
+  -FabricApiHost <selected-fabric-api-host> `
   -OutputDir .dataprojects/auth
 . .dataprojects/auth/env.ps1
 ```
+
+For a guest or cross-tenant workspace, add `-ResourceTenantId <resource-tenant-id>`. The Python helper still accepts `--tenant-id`, and the PowerShell wrapper still accepts `-TenantId`, as compatibility aliases.
 
 Direct route shape:
 ```text

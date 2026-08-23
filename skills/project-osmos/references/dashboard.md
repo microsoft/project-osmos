@@ -219,10 +219,10 @@ exact path shown:
 value is `null`:
 - `task.id` — the generated UUID for the task (matches
   `./.dataprojects/<task-id>/`).
-- `task.workspace_id` — from URL parse.
+- `task.workspace_id` — from Fabric page context, Microsoft Fabric Skills discovery, or URL parsing.
 - `task.workspace_name` — fetched with `GET /v1/workspaces/{workspaceId}`,
   field `displayName`. Never blank, never `(unknown)`, never the GUID.
-- `task.lakehouse_id` — from URL parse.
+- `task.lakehouse_id` — from Fabric page context, Microsoft Fabric Skills discovery, or URL parsing.
 - `task.lakehouse_name` — fetched with `GET
   /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}`, field
   `displayName`. Never blank, never `(unknown)`, never the GUID.

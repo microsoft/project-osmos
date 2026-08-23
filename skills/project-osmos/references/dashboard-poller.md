@@ -14,7 +14,8 @@ Set these from [`auth-and-routing.md`](auth-and-routing.md):
 | Variable | Source |
 | --- | --- |
 | `MWC_TOKEN` | fresh initial MWC token |
-| `TENANT_ID` | workspace home tenant for the bearer token |
+| `RESOURCE_TENANT_ID` | optional explicit tenant override for the target workspace |
+| `TENANT_ID` | legacy optional alias from auth env files created before `RESOURCE_TENANT_ID` |
 | `GENERATEMWC_URL` | resolved `generatemwctoken` endpoint |
 | `CAPACITY_ID` | workspace capacity object ID |
 | `WORKSPACE_ID` | Fabric workspace object ID |
@@ -26,14 +27,17 @@ Guard them first and export the values needed by the refresh recipe:
 
 ```bash
 : "${MWC_TOKEN:?set MWC_TOKEN before spawning the poller}"
-: "${TENANT_ID:?set TENANT_ID before composing REFRESH_CMD}"
+RESOURCE_TENANT_ID="$(
+  python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \
+    --normalize-resource-tenant-env
+)" || exit 1
 : "${GENERATEMWC_URL:?set GENERATEMWC_URL before composing REFRESH_CMD}"
 : "${CAPACITY_ID:?set CAPACITY_ID before composing REFRESH_CMD}"
 : "${WORKSPACE_ID:?set WORKSPACE_ID before composing REFRESH_CMD}"
 : "${LAKEHOUSE_ID:?set LAKEHOUSE_ID before composing REFRESH_CMD}"
 : "${TASKS_BASE:?set TASKS_BASE before spawning the poller}"
 : "${TASK_ID:?set TASK_ID before spawning the poller}"
-export TENANT_ID GENERATEMWC_URL CAPACITY_ID WORKSPACE_ID LAKEHOUSE_ID
+export RESOURCE_TENANT_ID GENERATEMWC_URL CAPACITY_ID WORKSPACE_ID LAKEHOUSE_ID
 ```
 
 ### Step 1 — stash the initial MWC token
@@ -62,7 +66,7 @@ import sys
 import urllib.error
 import urllib.request
 
-tenant = os.environ["TENANT_ID"]
+tenant = os.environ.get("RESOURCE_TENANT_ID")
 url = os.environ["GENERATEMWC_URL"]
 payload = {
     "capacityObjectId": os.environ["CAPACITY_ID"],
@@ -71,16 +75,15 @@ payload = {
     "artifactObjectIds": [os.environ["LAKEHOUSE_ID"]],
 }
 
-bearer = subprocess.check_output(
-    [
-        "az", "account", "get-access-token",
-        "--tenant", tenant,
-        "--resource", "https://analysis.windows.net/powerbi/api",
-        "--query", "accessToken",
-        "-o", "tsv",
-    ],
-    text=True,
-).strip()
+token_command = ["az", "account", "get-access-token"]
+if tenant:
+    token_command.extend(["--tenant", tenant])
+token_command.extend([
+    "--resource", "https://analysis.windows.net/powerbi/api",
+    "--query", "accessToken",
+    "-o", "tsv",
+])
+bearer = subprocess.check_output(token_command, text=True).strip()
 if not bearer:
     sys.exit("az returned an empty Power BI bearer token")
 

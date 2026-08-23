@@ -4,7 +4,8 @@
 
 This helper performs the same sequence documented in the Project Osmos skill:
 
-1. Acquire a tenant-scoped Power BI bearer token with Azure CLI.
+1. Acquire a Power BI bearer token with Azure CLI, optionally scoped to an
+   explicit resource tenant.
 2. Read workspace and lakehouse metadata from the public Fabric API host.
 3. Capture the routed Fabric home cluster from response headers.
 4. Exchange the bearer token for an MWC token.
@@ -15,10 +16,11 @@ This helper performs the same sequence documented in the Project Osmos skill:
 
 Usage:
     python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \\
-      --tenant-id <tenant-guid> \\
       --workspace-id <workspace-guid> \\
       --lakehouse-id <lakehouse-guid> \\
       --output-dir .dataprojects/auth
+
+Add --resource-tenant-id <tenant-guid> only for an explicit tenant override.
 
 Then source the generated env file:
     source .dataprojects/auth/env.sh
@@ -31,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import stat
 import subprocess
@@ -40,6 +43,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 
 PBI_RESOURCE = "https://analysis.windows.net/powerbi/api"
@@ -74,12 +78,25 @@ class TokenExchange:
     global_token_base: str
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tenant-id", required=True, help="Workspace home tenant ID for Azure CLI token acquisition.")
-    parser.add_argument("--workspace-id", required=True, help="Fabric workspace object ID.")
-    parser.add_argument("--lakehouse-id", required=True, help="Default Spark-session lakehouse object ID.")
-    parser.add_argument("--output-dir", required=True, type=Path, help="Directory for token/env/routing outputs.")
+    parser.add_argument(
+        "--resource-tenant-id",
+        help="Optional tenant ID that owns the target Fabric workspace. Omit it to use the current Azure CLI session.",
+    )
+    parser.add_argument(
+        "--tenant-id",
+        dest="legacy_tenant_id",
+        help="Deprecated alias for --resource-tenant-id.",
+    )
+    parser.add_argument(
+        "--normalize-resource-tenant-env",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--workspace-id", help="Fabric workspace object ID.")
+    parser.add_argument("--lakehouse-id", help="Default Spark-session lakehouse object ID.")
+    parser.add_argument("--output-dir", type=Path, help="Directory for token/env/routing outputs.")
     parser.add_argument("--fabric-api-host", default=DEFAULT_FABRIC_API_HOST, help="Public Fabric API host.")
     parser.add_argument("--workload-type", default=DEFAULT_WORKLOAD_TYPE, help="MWC workload type.")
     parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds.")
@@ -88,7 +105,42 @@ def parse_args() -> argparse.Namespace:
         default=PBI_RESOURCE,
         help="Azure CLI resource for the bearer token. Defaults to the Power BI API resource.",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if not args.normalize_resource_tenant_env:
+        missing = [
+            option
+            for option, value in (
+                ("--workspace-id", args.workspace_id),
+                ("--lakehouse-id", args.lakehouse_id),
+                ("--output-dir", args.output_dir),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)}")
+    return args
+
+
+def select_resource_tenant_id(
+    resource_tenant_id: str | None,
+    legacy_tenant_id: str | None,
+    *,
+    resource_label: str = "--resource-tenant-id",
+    legacy_label: str = "--tenant-id",
+) -> str | None:
+    def normalize(value: str | None, label: str) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            return str(UUID(value.strip()))
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a valid GUID") from exc
+
+    selected = normalize(resource_tenant_id, resource_label)
+    legacy = normalize(legacy_tenant_id, legacy_label)
+    if selected and legacy and selected != legacy:
+        raise ValueError(f"{resource_label} and {legacy_label} disagree; select the tenant that owns the workspace")
+    return selected or legacy
 
 
 def normalize_base_url(value: str) -> str:
@@ -100,24 +152,29 @@ def normalize_base_url(value: str) -> str:
     return trimmed
 
 
-def get_bearer_token(tenant_id: str, resource: str) -> str:
+def get_bearer_token(resource_tenant_id: str | None, resource: str) -> str:
     command = [
         "az",
         "account",
         "get-access-token",
-        "--tenant",
-        tenant_id,
-        "--resource",
-        resource,
-        "--query",
-        "accessToken",
-        "-o",
-        "tsv",
     ]
+    if resource_tenant_id:
+        command.extend(["--tenant", resource_tenant_id])
+    command.extend(["--resource", resource, "--query", "accessToken", "-o", "tsv"])
     try:
         token = subprocess.check_output(command, text=True).strip()
     except (subprocess.CalledProcessError, OSError) as exc:
-        raise RuntimeError(f"failed to acquire Azure CLI token: {exc}") from exc
+        if resource_tenant_id:
+            message = (
+                "failed to acquire an Azure CLI token for the selected resource tenant. "
+                "Run az login --tenant <resource-tenant-id> --allow-no-subscriptions before retrying"
+            )
+        else:
+            message = (
+                "failed to acquire an Azure CLI token from the current session. Run az login before retrying, "
+                "or provide --resource-tenant-id when the workspace belongs to another tenant"
+            )
+        raise RuntimeError(message) from exc
     if not token:
         raise RuntimeError("Azure CLI returned an empty bearer token")
     return token
@@ -291,6 +348,7 @@ def build_routing_payload(
     context: WorkspaceContext,
     token_exchange: TokenExchange,
     token_file: Path,
+    resource_tenant_id: str | None,
 ) -> tuple[dict[str, str], dict[str, Any], str]:
     token_data = token_exchange.token_data
     mwc_token = token_data.get("Token") or token_data.get("token") or token_data.get("mwcToken")
@@ -306,7 +364,8 @@ def build_routing_payload(
     )
     generatemwc_url = f"{token_exchange.token_base_used}/metadata/v201606/generatemwctoken"
     exports = {
-        "TENANT_ID": args.tenant_id,
+        "RESOURCE_TENANT_ID": resource_tenant_id or "",
+        "TENANT_ID": resource_tenant_id or "",
         "FABRIC_API_HOST": fabric_api_host,
         "GENERATEMWC_URL": generatemwc_url,
         "CAPACITY_ID": context.capacity_id,
@@ -353,15 +412,34 @@ def write_outputs(output_dir: Path, exports: dict[str, str], routing: dict[str, 
 
 def main() -> int:
     args = parse_args()
+    if args.normalize_resource_tenant_env:
+        resource_tenant_id = select_resource_tenant_id(
+            os.environ.get("RESOURCE_TENANT_ID"),
+            os.environ.get("TENANT_ID"),
+            resource_label="RESOURCE_TENANT_ID",
+            legacy_label="TENANT_ID",
+        )
+        if resource_tenant_id:
+            print(resource_tenant_id)
+        return 0
+
+    resource_tenant_id = select_resource_tenant_id(args.resource_tenant_id, args.legacy_tenant_id)
     fabric_api_host = normalize_base_url(args.fabric_api_host)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    bearer = get_bearer_token(args.tenant_id, args.token_resource)
+    bearer = get_bearer_token(resource_tenant_id, args.token_resource)
     context = resolve_workspace_context(args, fabric_api_host, bearer)
     token_exchange = exchange_mwc_token(args, bearer, fabric_api_host, context)
     token_file = output_dir / "mwc-token"
-    exports, routing, mwc_token = build_routing_payload(args, fabric_api_host, context, token_exchange, token_file)
+    exports, routing, mwc_token = build_routing_payload(
+        args,
+        fabric_api_host,
+        context,
+        token_exchange,
+        token_file,
+        resource_tenant_id,
+    )
     write_outputs(output_dir, exports, routing, mwc_token)
 
     env_file = output_dir / "env.sh"
