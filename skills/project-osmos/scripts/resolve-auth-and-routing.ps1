@@ -11,8 +11,8 @@ Use this entry point from Windows PowerShell or cross-platform pwsh.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$TenantId,
+    [Alias("TenantId")]
+    [string]$ResourceTenantId,
 
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceId,
@@ -74,7 +74,6 @@ $arguments = @()
 $arguments += @($python.PrefixArgs)
 $arguments += @(
     $scriptPath,
-    "--tenant-id", $TenantId,
     "--workspace-id", $WorkspaceId,
     "--lakehouse-id", $LakehouseId,
     "--output-dir", $OutputDir,
@@ -83,6 +82,9 @@ $arguments += @(
     "--timeout", ([string]$Timeout),
     "--token-resource", $TokenResource
 )
+if (-not [string]::IsNullOrWhiteSpace($ResourceTenantId)) {
+    $arguments += @("--resource-tenant-id", $ResourceTenantId)
+}
 
 & $python.FileName @arguments
 if ($LASTEXITCODE -ne 0) {

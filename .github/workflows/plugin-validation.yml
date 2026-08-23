@@ -23,6 +23,8 @@ jobs:
           python-version: "3.11"
       - name: Verify all marketplace manifests are synchronized
         run: python build/validate_plugin.py --check
+      - name: Test auth and routing helper
+        run: python -m unittest discover -s tests -p "test_*.py"
   validate-windows:
     name: Windows marketplace synchronization
     runs-on: windows-latest

@@ -24,7 +24,7 @@ You need:
 | Fabric workspace | The workspace must be assigned to Fabric capacity and contain a Lakehouse. |
 | Workspace permissions | Contributor or higher on the target workspace. |
 | Fabric Copilot setting | **User can use Copilot and other features powered by Azure OpenAI** must be enabled for the tenant or workspace. |
-| Azure CLI | Install Azure CLI and sign in with an identity that can access the workspace. |
+| Azure CLI | Install Azure CLI and sign in with an identity that can access the workspace. Guest users may optionally supply the workspace's resource tenant ID. |
 | AI coding client | Install GitHub Copilot CLI, Codex, or Claude Code. |
 
 ## Install
@@ -58,12 +58,21 @@ Restart the client after the first installation. In Claude Code, you can instead
 
 ### 1. Sign in to Azure
 
+Sign in with the Azure CLI:
+
 ```bash
-az login
-az account show
+az login --allow-no-subscriptions
 ```
 
-Confirm that `az account show` displays the expected account and tenant.
+Verify Power BI token acquisition without printing the token:
+
+```bash
+az account get-access-token \
+  --resource https://analysis.windows.net/powerbi/api \
+  --output none
+```
+
+Project Osmos uses this current session by default. If a guest or cross-tenant session cannot access the workspace, provide the Microsoft Entra tenant ID that owns the workspace when prompted.
 
 ### 2. Start your client
 
@@ -83,10 +92,12 @@ Use Project Osmos to transform data in my Fabric lakehouse.
 
 The skill asks for:
 
-1. The full browser URL of your Fabric Lakehouse.
+1. Which Fabric workspace and Lakehouse to use. It can reuse Microsoft Fabric page context, resolve names with Microsoft Fabric Skills, or parse a Lakehouse browser URL.
 2. Your complete data engineering instruction.
 3. Any optional constraints or additional context.
-4. Confirmation of the recommended operating settings before the run starts.
+4. Review of the recommended operating settings before the run starts.
+
+The skill asks for a resource tenant ID only if the current Azure CLI session cannot access the workspace.
 
 ### 4. Describe the outcome
 
@@ -146,9 +157,9 @@ Restart the client after an update so the new skill content is loaded.
 | Issue | What to do |
 | --- | --- |
 | Project Osmos is not available after installation | Restart the client, then run the install commands again and check for an installation error. |
-| Azure authentication fails | Run `az login`, then verify the expected account and tenant with `az account show`. |
+| Azure authentication fails | Run `az login --allow-no-subscriptions` and retry. For a guest or cross-tenant workspace, sign in with `az login --tenant <resource-tenant-id> --allow-no-subscriptions`. |
 | Workspace or capacity lookup fails | Confirm the Lakehouse URL is correct, the workspace has Fabric capacity, and your Azure identity can access it. |
-| Lakehouse lookup or task creation fails | Open the Lakehouse in Fabric and copy the complete browser URL again. |
+| Lakehouse lookup or task creation fails | Confirm the workspace and Lakehouse names, choose the intended match if discovery is ambiguous, or provide the complete Lakehouse browser URL. |
 | The task runs for a long time | Spark startup, planning, and complex transformations can take time. Continue monitoring the existing task rather than creating another one. |
 | The local dashboard or poller stopped | Resume the existing task with the same task ID. Do not restart intake or create a duplicate task. |
 | The installed plugin appears outdated | Run the manual update command for your client, restart it, and retry. |

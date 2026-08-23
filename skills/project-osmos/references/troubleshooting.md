@@ -11,7 +11,7 @@
 | Running with no session ID | This can be valid during Spark session acquisition. Continue polling. |
 | Agent looks stuck in a loop / repeats discovery | Expected: Osmos runs many experiments and revisits steps to converge on the best one, so it takes time and progress can look repetitive. Do not assume it is looping; do not cancel or re-run. Keep polling and relay progress. |
 | Workspace has no capacity | Stop and ask the user to assign/provision Fabric capacity before creating or running a task. |
-| `generatemwctoken` returns `HTTP 403` with an empty body | The bearer token's tenant does not match the workspace's home tenant. Re-acquire the token with `az account get-access-token --tenant <tenant-id> --resource https://analysis.windows.net/powerbi/api`, and `az login --tenant <tenant-id>` if needed. |
+| `generatemwctoken` returns `HTTP 403` with an empty body | The current Azure CLI session may be in the wrong tenant. Ask for the workspace's resource tenant ID only now, then run `az login --tenant <resource-tenant-id> --allow-no-subscriptions` and retry token acquisition with the same tenant override. |
 | `generatemwctoken` returns `HTTP 403` with `Tenant not authorized for cluster` | Run `scripts/resolve-auth-and-routing.py` or `scripts/resolve-auth-and-routing.ps1`. The helper reads the routed home cluster from Fabric response headers and retries token exchange there. Do not hand-edit hosts, workload types, token audiences, or capacity SKUs. |
 
 

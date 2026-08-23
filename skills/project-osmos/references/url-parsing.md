@@ -1,34 +1,36 @@
 # Parsing Fabric URLs to extract IDs
-Ask for the Lakehouse browser URL and parse the workspace ID, Lakehouse ID, and host from it. Do not ask for workspace ID or lakehouse ID separately during startup; direct IDs are not enough because the URL confirms the Fabric portal and resource path. If the user pasted IDs instead of a URL, ask them to paste the Lakehouse URL.
+Use this reference only when the user chooses **Provide a Lakehouse URL**. Workspace/Lakehouse names and Fabric page context are separate valid context paths owned by `SKILL.md`; do not redirect those paths here or require a URL.
 
-## Required path: ask for the Lakehouse URL
+## Ask for the Lakehouse URL
 Prompt the user with:
 > Open Fabric in your browser, navigate to the Lakehouse where you want the Project Osmos run to be stored, copy the full URL from the address bar, and paste it here.
 
-Run the parser below. Echo **both parsed IDs in full** (no ellipsis — the user needs to verify the full GUIDs character-by-character) and require explicit user confirmation before doing anything else, including before rendering the intake recommendations card. Shortened (`85a394cb-...dda8`) GUIDs are only acceptable in the post-launch `Project Osmos started` summary table, never during pre-flight verification.
+Run the parser below. When both IDs are valid and the host is supported, use the parsed context directly. Do not add a second confirmation step for values derived from the URL the user just supplied.
 
-## Regex
-Apply against the pasted URL, case-insensitive:
+## Path patterns
+Parse the URL first, then apply these patterns to `urlsplit(...).path` only. Never search the raw URL, query, or fragment for IDs.
 ```text
-/groups/(?P<ws>[0-9a-f-]{36})(?:/lakehouses/(?P<lh>[0-9a-f-]{36}))?
+UUID = [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+workspace = ^/groups/(?P<ws>{UUID})(?:/|$)
+lakehouse = ^/groups/(?P<ws>{UUID})/lakehouses/(?P<lh>{UUID})(?:/|$)
 ```
 - `ws` → workspace ID
-- `lh` → Lakehouse ID, required for a start flow
+- `lh` → Lakehouse ID when the path is Lakehouse-scoped
 - Both GUIDs are 36 characters with the standard `8-4-4-4-12` hyphen layout.
+- If the path begins with `/groups/<workspace-id>/lakehouses/` but the Lakehouse segment is not a strict UUID, reject the URL rather than treating it as workspace-only.
 
 ### Supported URL shapes
 | Shape | Example | Yields |
 |---|---|---|
 | Lakehouse home | `https://app.fabric.microsoft.com/groups/<ws>/lakehouses/<lh>?experience=power-bi` | workspace + lakehouse |
 | Lakehouse explorer with table path | `https://app.fabric.microsoft.com/groups/<ws>/lakehouses/<lh>/tables/Invoice` | workspace + lakehouse |
-| SQL endpoint of the same lakehouse | `https://app.fabric.microsoft.com/groups/<ws>/sqlendpoints/<sql>` | workspace only — ask user to also paste the Lakehouse URL |
-| Notebook | `https://app.fabric.microsoft.com/groups/<ws>/synapsenotebooks/<nb>` | workspace only — ask user to also paste the Lakehouse URL |
-| Workspace home | `https://app.fabric.microsoft.com/groups/<ws>/list` | workspace only — ask user to also paste the Lakehouse URL |
+| SQL endpoint of the same lakehouse | `https://app.fabric.microsoft.com/groups/<ws>/sqlendpoints/<sql>` | workspace only — return to the context choices |
+| Notebook | `https://app.fabric.microsoft.com/groups/<ws>/synapsenotebooks/<nb>` | workspace only — return to the context choices |
+| Workspace home | `https://app.fabric.microsoft.com/groups/<ws>/list` | workspace only — return to the context choices |
 
-If the regex matches both groups and the host is supported, proceed to confirmation. If it matches only the workspace, prompt:
-> I read workspace `<ws-short>` from that URL but no Lakehouse. Please open the specific Lakehouse you want Spark to attach to and paste *that* URL.
+If the Lakehouse pattern matches and the host is supported, proceed. If only the workspace pattern matches, return to the context choices in `SKILL.md` with that workspace as the candidate instead of requiring another URL.
 
-If the regex matches nothing, or if the user pasted bare GUIDs instead of a URL, treat it as malformed for startup and ask the user to repaste the Lakehouse browser URL.
+If neither path pattern matches, treat the URL as malformed and ask the user to repaste it or choose the workspace/Lakehouse names path.
 
 ## Supported URL hosts
 Accept only the public Fabric browser hosts below.
@@ -38,34 +40,25 @@ Accept only the public Fabric browser hosts below.
 | `app.fabric.microsoft.com` | Fabric portal host. |
 | `app.powerbi.com` | Power BI portal host. |
 
-If the host is not supported, ask the user to repaste a Lakehouse URL from the public Fabric portal.
+If the host is not supported, ask the user to repaste a Lakehouse URL from the public Fabric portal or choose the workspace/Lakehouse names path.
 
 
-## Confirmation before any API call
+## Validated context
 
-IDs are always UUIDs. Echo the parsed values in this exact shape and require explicit `yes` before proceeding:
-
-```text
-Parsed from your URL:
-  Workspace ID:  85a394cb-0000-4000-8000-00000000dda8
-  Lakehouse ID:  3852746b-0000-4000-8000-00000000b928
-  Host:          app.fabric.microsoft.com
-
-Use these? (yes / no / repaste)
-```
-
-`repaste` re-runs the prompt. `no` cancels the start flow unless the user provides a new Lakehouse URL.
+IDs are always UUIDs. A supported host plus valid workspace and Lakehouse UUIDs is sufficient to continue. If parsing or validation fails, let the user repaste the URL or choose the workspace/Lakehouse names path.
 
 ## Pseudocode
 
-URL regex:
+Path regexes:
 
 ```python
 import re
+from urllib.parse import urlsplit
 
-URL_RE = re.compile(
-    r"/groups/(?P<ws>[0-9a-f-]{36})(?:/lakehouses/(?P<lh>[0-9a-f-]{36}))?",
-    re.I,
+UUID_RE = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+WORKSPACE_PATH_RE = re.compile(rf"^/groups/(?P<ws>{UUID_RE})(?:/|$)", re.I)
+LAKEHOUSE_PATH_RE = re.compile(
+    rf"^/groups/(?P<ws>{UUID_RE})/lakehouses/(?P<lh>{UUID_RE})(?:/|$)", re.I
 )
 ```
 
@@ -82,10 +75,17 @@ SUPPORTED_HOSTS = {
 Parser:
 ```python
 def parse_fabric_url(url: str):
-    m = URL_RE.search(url)
-    if not m:
+    value = url.strip()
+    normalized = value if "://" in value else f"https://{value}"
+    parts = urlsplit(normalized)
+    workspace_match = WORKSPACE_PATH_RE.match(parts.path)
+    if not workspace_match:
         return None
-    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", url, flags=re.I).split("/", 1)[0].lower()
+    lakehouse_match = LAKEHOUSE_PATH_RE.match(parts.path)
+    lakehouse_prefix = f"/groups/{workspace_match.group('ws')}/lakehouses/".lower()
+    if parts.path.lower().startswith(lakehouse_prefix) and not lakehouse_match:
+        return None
+    host = parts.netloc.lower()
     if host not in SUPPORTED_HOSTS:
         return None
 ```
@@ -94,11 +94,11 @@ def parse_fabric_url(url: str):
 Parser return:
 ```python
     return {
-        "workspace_id": m.group("ws"),
-        "lakehouse_id": m.group("lh"),    # may be None
+        "workspace_id": workspace_match.group("ws"),
+        "lakehouse_id": lakehouse_match.group("lh") if lakehouse_match else None,
         "host":         host,
     }
 ```
 
-Use this inline parser in the agent's intake step; no separate script is required. If `lakehouse_id` is `None` or the host is unsupported, do not proceed to auth or API calls; prompt for a complete Lakehouse URL from the public Fabric portal.
+Use this inline parser in the agent's intake step; no separate script is required. An unsupported host or invalid path is rejected. A valid workspace-only path returns `lakehouse_id: None` to the context choices in `SKILL.md`; do not proceed to auth or task creation until a Lakehouse is selected.
 
