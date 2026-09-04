@@ -25,6 +25,7 @@ You need:
 | Workspace permissions | Contributor or higher on the target workspace. |
 | Fabric Copilot setting | **User can use Copilot and other features powered by Azure OpenAI** must be enabled for the tenant or workspace. |
 | Azure CLI | Install Azure CLI and sign in with an identity that can access the workspace. Guest users may optionally supply the workspace's resource tenant ID. |
+| Python 3.11+ | Use an existing compatible interpreter. Project Osmos helpers use only the standard library and do not install packages or modify local environments. |
 | AI coding client | Install GitHub Copilot CLI, Codex, or Claude Code. |
 
 ## Install

@@ -2,7 +2,7 @@
 
 Runtime reference for the `project-osmos` skill's operational-intake step.
 
-The intake classifies the task type, asks only relevant questions with task-type-aware defaults, then renders a `## Operational constraints` block appended verbatim before any API call.
+The intake classifies the task, extracts explicit requirements, asks only for unresolved decisions, validates the resulting plan, then renders the verbatim `## User outcome` followed by a self-contained `## Execution plan` before any API call.
 
 ## Task types
 
@@ -21,16 +21,53 @@ Classify every task into exactly one type before asking questions.
 
 - The CLI must announce the inferred task type before asking any
   question, in a single line:
-  > `I'm treating this as a transformative ingest. Type "change" to pick a different task type, anything else to continue.`
+  > `I'm treating this as a transformative ingest. Reply "continue" to use that classification or "change" to pick a different task type.`
+- Advance only on explicit `continue`. On `change`, show the six task types and
+  wait for a selection. Repeat the classification prompt for any other reply;
+  never interpret a question, blank reply, or unrelated text as approval.
 - When in doubt, classify as **Unclear** and run the full questionnaire; the intake exists to prevent correctness loss from over-pruning questions.
-- **Red-flag verbs that force `Unclear`** unless the description is
-  unusually specific: `update`, `delete`, `fix`, `clean up`, `migrate`,
-  `sync`, `merge`, `correct`. These verbs map to multiple task types
-  and the user must disambiguate explicitly.
+- **Red-flag verbs that force `Unclear`** when the affected resource, operation,
+  or intended result is missing: `update`, `delete`, `fix`, `clean up`,
+  `migrate`, `sync`, `merge`, `correct`. A specific instruction such as
+  "delete rows where status=cancelled from Claims" remains **Mutative**.
+
+## Derive requirements before applying defaults
+
+The recommendations card is not a static projection of the task type. Before
+rendering it, extract all explicit decisions from the user's outcome and any
+resolved Fabric context:
+
+- named resources, each resource's role, and whether it is a source,
+  intermediate target, or final target;
+- whether each write target is missing, existing-empty, existing-nonempty, or
+  unknown when that state can be discovered read-only;
+- explicit rerun language such as `rerun`, `run again`, `idempotent`,
+  `counts unchanged`, `append`, `incremental`, `replace`, or `overwrite`;
+- named keys, partitions, source globs, date ranges, or other scope boundaries;
+- requested review, approval, validation, or manual-promotion gates;
+- requested task display name, artifact format, artifact name, and destination
+  path; keep the task display name distinct from the artifact name;
+- destructive-write limits such as expected affected rows or a maximum
+  mutation count.
+
+Resolve every recommendation in this order:
+
+1. **Explicit user requirement.** Preserve it verbatim and mark the row
+   `(from your request)`.
+2. **Discovered resource fact.** Use read-only metadata such as target
+   existence to remove impossible choices.
+3. **Task-type fallback.** Use the matrix only when the outcome and resource
+   facts do not decide the setting.
+
+Never let a task-type fallback override an explicit user requirement. If two
+explicit requirements conflict, leave the setting unresolved and handle it in
+the pre-dispatch reconciliation step.
 
 ## Intake flow: recommendations card first
 
-After classification, compute each relevant recommended answer from the matrix, render one CLI **summary card**, and offer four reply commands instead of asking questions one by one.
+After classification, compute each relevant recommendation using the derivation
+order above, render one CLI **summary card**, and show one four-choice action
+menu instead of asking questions one by one.
 
 ### Step 1 — render the recommendation card
 
@@ -39,9 +76,7 @@ Render the card inside a **fenced code block** (triple backticks, no language ta
 Use a **vertical, line-oriented layout**: each row has an answer line and a `Why:` line, and rows may include short follow-up guidance blocks such as the Question 1 warning. Never use a wide 4-column ASCII table that wraps badly below ~120 columns.
 
 ```
-Based on your task description (<task type>), I recommend these settings.
-
-Note: To change any recommended setting, reply with `change <N>`. To understand the options for a setting, reply with `explain <N>`.
+Based on your task description and explicit requirements (<task type>), I recommend these settings.
 
  1. Permission boundary
     → <answer — multi-line if more than one resource>
@@ -51,19 +86,19 @@ Note: To change any recommended setting, reply with `change <N>`. To understand 
     If a resource must not be mutated, enforce that with Fabric/OneLake permissions.
 
  2. Safety pattern
-    → <answer | skipped>
+    → <one sub-line per write target | skipped>
     Why: <…>
 
  3. Promote step
-    → <answer | skipped>
+    → <one sub-line per applicable write target | skipped>
     Why: <…>
 
  4. Re-run semantics
-    → <answer>
+    → <one sub-line per write target | skipped>
     Why: <…>
 
  5. Schema evolution
-    → <answer | skipped>
+    → <one sub-line per write target | skipped>
     Why: <…>
 
  6. Artifact format
@@ -71,44 +106,102 @@ Note: To change any recommended setting, reply with `change <N>`. To understand 
     Why: <…>
 
  7. Artifact destination
-    → <destination keyword only; ask for the concrete path only after accept/change 7>
+    → <destination keyword and extracted path, when supplied>
     Why: <…>
 
  8. Reasoning effort
-    → medium
-    Why: Medium is the default for a balanced budget; lower to `low` for the fastest path on simple work, or raise to `high` or `xhigh` to let the agent run more experiments on complex, ambiguous, or risky work (it will take longer).
+    → <explicit user choice, otherwise medium>
+    Why: Medium is the standard balanced default; change it only when the user explicitly chooses another level.
 
-Reply with one of:
-  • accept         — start the run with these settings
-  • change <N>     — edit one row (e.g. "change 4")
-  • explain <N>    — see the other options for that row
-  • walk through   — answer every question from scratch
 ```
 
 **Rules for the card:**
 
-- Use matrix recommendations; render skipped/`n/a` rows as `→ skipped` rather than omitting them so all 8 rows remain visible.
+- Use the derivation order above. The matrix supplies fallbacks only. Render
+  skipped/`n/a` rows as `→ skipped` rather than omitting them so all 8 rows
+  remain visible.
 - The "Why:" line is required: one fresh plain-English sentence for the user's task, not the question's "What this means" subtitle.
-- For Question 7 (artifact destination), render only the destination keyword (`workspace folder`, `lakehouse Files`, `both`, or `let the agent decide`) — **do not prompt for the folder path inline with the card.** After `accept` or `change 7 …`, check the resolved Q7 value:
-  - If Q7 ∈ {`workspace folder`, `both`}: emit one standalone prompt asking only for the path (*"What folder in the workspace should the notebook be saved to? (e.g. `/notebooks/` or `ETL/notebooks/`)"*) and wait for the reply before starting the run.
+- For Question 7 (artifact destination), extract and render a path already
+  supplied by the user. After `accept` or `change 7 …`, check the resolved Q7:
+  - If Q7 ∈ {`workspace folder`, `both`} and no path was supplied: emit one
+    standalone prompt asking only for the path (*"What folder in the workspace
+    should the notebook be saved to? (e.g. `/notebooks/` or
+    `ETL/notebooks/`)"*) and wait before starting the run.
   - If Q7 ∈ {`lakehouse Files`, `let the agent decide`}: no path prompt — start immediately.
   Never emit the folder-path question with the `accept / change / explain / walk through` reply list; the user cannot answer both at once.
-- Permission boundary may be multi-line under `→` when the user named more than one resource (one sub-line per resource).
+- Questions 1–5 may be multi-line under `→` when more than one resource or
+  write target exists. Give every sub-line a stable suffix (`1a`, `1b`, `2a`,
+  `2b`, ...) and accept scoped changes such as `change 2a`; bare `change 2`
+  re-runs every Question 2 sub-line.
 - Always include the three-line warning block directly under Question 1's
   `Why:` line, including when re-rendering the card after `change <N>` or
   `explain <N>`. The warning block starts with:
   `⚠️ Model-only guidance, not a hard Fabric/OneLake system constraint.`
 - **Never use ANSI escape sequences** inside the card (`\033[…m`); raw `\033` characters leak through on some clients.
+- Immediately after the card, use `ask_user` with exactly these four visible
+  choices:
+  1. **Accept recommendations**
+  2. **Change a setting**
+  3. **Explain a setting**
+  4. **Walk through every question**
+- Do not enumerate `change 1` through `change 8` or `explain 1` through
+  `explain 8` in the action menu. That produces an overwhelming 18-item list.
+- If the user selects **Change a setting** or **Explain a setting**, issue one
+  second `ask_user` prompt listing only the eight numbered setting names. If a
+  row has per-target sub-lines, select the row first, then ask which target.
+- Freeform commands such as `change 4`, `change 2a`, `explain 4`, `accept`, and
+  `walk through` remain supported when the user types them directly instead of
+  using the menu.
 
 ### Step 2 — handle the reply
 
-| User reply | Skill behavior |
+| User action | Skill behavior |
 |---|---|
-| `accept` | Compose the `## Operational constraints` preamble from the recommendations. **If the resolved Q7 is `workspace folder` or `both`, ask one standalone follow-up prompt for the folder path before starting the run; otherwise start immediately.** Never bundle the path question with the four reply commands. |
-| `change <N>` | Re-ask question N using the verbose single-question rendering (subtitle + options + glosses), accept the user's pick, **re-show the summary card** with row N updated and marked `(changed)`, then offer the four commands again. |
-| `explain <N>` | Render the option table for question N (see below), let the user pick `a/b/c/...` to change, or `cancel` to dismiss the table without changing the answer. After the pick, re-show the summary card. |
-| `walk through` | Abandon the card; fall through to the legacy one-question-at-a-time flow (full questionnaire below). For power users, audits, or training. |
-| anything else | Treat as a soft no-match: repeat the card and the four commands. Never auto-start. |
+| **Accept recommendations** or typed `accept` | Resolve required dependent values, run pre-dispatch reconciliation, then compose the user outcome followed by the `## Execution plan`. Start only when no value or conflict remains unresolved. |
+| **Change a setting** or typed `change <N>` / `change <N><suffix>` | Ask for the setting number only if it was not typed, then re-ask the question or scoped sub-line. Re-show the summary card with the changed row marked `(changed)`, followed by the same four-choice action menu. |
+| **Explain a setting** or typed `explain <N>` | Ask for the setting number only if it was not typed, then render that option table. Let the user select an option or cancel. Re-show the card and four-choice action menu. |
+| **Walk through every question** or typed `walk through` | Abandon the card and use the one-question-at-a-time flow. |
+| anything else | Treat as a soft no-match: repeat the card and the four-choice action menu. Never auto-start. |
+
+**Accept recommendations** or typed `accept` is the user's final authorization
+to create and start exactly one Osmos task after reconciliation succeeds. Do
+not display another confirmation such as **Accept and create the task** /
+**Do not create the task**, and do not ask the user to accept the compiled
+handoff again. The recommendation card is the review-and-consent surface.
+
+### Step 2b — resolve dependent values and reconcile before dispatch
+
+After `accept`, collect only values required by the resolved choices:
+
+- For `append with dedup key` or `reconcile idempotently`, collect one or more
+  stable key columns or a partition scope for each applicable target. Do not
+  dispatch with an unresolved key.
+- For a workspace artifact, collect the destination path only when it was not
+  already extracted from the outcome.
+- When an artifact was explicitly named, preserve that name. Otherwise state
+  `agent's choice`; do not silently drop the name.
+- For a mutative task, use a supplied expected affected-row count or mutation
+  cap. If neither is supplied and the task is broad or ambiguous, ask for a
+  limit before dispatch.
+- For folder or multi-file ingest, preserve a supplied glob/date boundary. If
+  the source scope is ambiguous, ask which files are in scope.
+
+Then compare the complete plan with the original outcome. At minimum, detect:
+
+| Outcome signal | Incompatible setting |
+|---|---|
+| `rerun`, `run again`, `counts unchanged`, `idempotent`, `safe to re-run` | `fail if target already populated` or `append (duplicates allowed)` |
+| `append`, `incremental`, `new rows` | `overwrite (truncate then write)` |
+| `replace`, `full refresh`, `rebuild` | append-only semantics |
+| `review`, `approve`, `before publishing`, `let me validate` | `Approval gates: none` |
+| a write, delete, update, or schema change | every named resource is `read-only` |
+| a missing target | clone-only or locked-existing-schema behavior |
+
+When a conflict exists, do not use precedence and do not dispatch. Show one
+targeted question that quotes both conflicting requirements and asks the user
+to choose. Re-run reconciliation after the answer. If the user cannot resolve
+the conflict, fail task creation locally with the conflict named; never hand an
+ambiguous contract to Osmos.
 
 ### Step 3 — `explain <N>` rendering
 
@@ -116,17 +209,20 @@ Reply with one of:
 [Q4] Re-run semantics
    If you run the same task multiple times, what should happen subsequently?
 
-   | Pick | Option                          | Plain English                              |
-   |------|---------------------------------|--------------------------------------------|
-   | a    | append w/ dedup ← recommended   | <gloss>                                    |
-   | b    | append blindly                  | <gloss>                                    |
-   | c    | fail if populated               | <gloss>                                    |
-   | d    | truncate and reload             | <gloss>                                    |
+   | Pick | Option                         | Plain English |
+   |------|--------------------------------|---------------|
+   | a    | <canonical option 1>           | <canonical executable meaning> |
+   | b    | <canonical option 2>           | <canonical executable meaning> |
+   | ...  | ...                            | ... |
 
-   Reply with `a`, `b`, `c`, `d` to change the answer, or `cancel` to dismiss this table without changing anything.
+   Reply with the displayed letter to change the answer, or `cancel` to dismiss this table without changing anything.
 ```
 
-The `Pick` letters are 0-indexed alphabetically across visible options in matrix-defined display order. The `← recommended` marker stays on the recommended option (which may not be `a`).
+Generate this table directly from the canonical option table for the question;
+never maintain a second hand-written option list. The `Pick` letters start at
+`a` and proceed alphabetically across visible options in canonical display
+order. The `← recommended` marker stays on the derived recommendation (which
+may not be `a`).
 
 ### Step 4 — marking changed rows
 
@@ -134,10 +230,13 @@ After a `change` or `explain` mutation, append literal `(changed)` to the row's 
 
 ### Ripple handling
 
-When a change to one question changes which other questions apply (e.g., Question 2 from `clone-and-promote` to `staging table` means Question 3 is no longer asked):
+When a change to one question changes which other questions apply (e.g.,
+Question 2 from `clone-and-promote` to `staging table + manual promotion`
+means Question 3 is no longer asked):
 
 - **Preserve** the user's overrides for any question that is still asked.
-- **Remove** any override that becomes inapplicable; restore the matrix default for any newly-applicable question.
+- **Remove** any override that becomes inapplicable; re-run dynamic derivation
+  for any newly applicable question.
 - **Re-render** the card so the user sees the cascade explicitly.
 - **Never** silently start a run after a ripple — always offer the four reply commands again.
 
@@ -145,9 +244,15 @@ If the change is large enough that the task type itself flips (e.g., user adds a
 
 ## The questions
 
-Canonical text for `change <N>`, `explain <N>`, and `walk through` mode. The "recommended" mark is the `Unclear` fallback; per-task-type overrides live in the matrix.
+Canonical text for `change <N>`, `explain <N>`, and `walk through` mode.
+The `recommended` marker is applied after dynamic derivation; the table order
+does not change based on which option is recommended.
 
-> **Rendering rule for the CLI:** in `change` or `walk through` mode, render the **subtitle line** ("What this means") above the options, and render each option label with its short gloss (text after the em-dash). Do not show bare option keys alone.
+> **Rendering rule for the CLI:** in `change` or `walk through` mode, render
+> the **subtitle line** ("What this means") above the options, and render each
+> option label with its short gloss (text after the em-dash). That gloss is the
+> option's executable meaning. Serialize it into the handoff; never send a bare
+> option key and assume Osmos can read this questionnaire.
 
 ### Question 1. Per-resource permission *(asked once per named resource)*
 
@@ -161,10 +266,10 @@ also change it?
 
 | Option | Label shown to user | Notes |
 |---|---|---|
-| `read-only` ← recommended | **read-only** — agent can SELECT from it but cannot modify it. | Safe default. |
+| `read-only` | **read-only** — agent can SELECT from it but cannot modify it. | Safe fallback when no write is requested. |
 | `write` | **write** — agent can modify, append, overwrite, or create rows here. | Triggers Questions 2–5 for this resource. |
 
-### Question 2. Safety pattern for writes *(only if any resource is `write`)*
+### Question 2. Safety pattern for writes *(once per write target)*
 
 **What this means:** The agent will iterate (write code, run, fix, run
 again). Where should those in-progress attempts land so they don't
@@ -173,21 +278,22 @@ corrupt your real table?
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `let the agent decide` | **let the agent decide** — pick per resource based on what kind of write it is. | |
-| `clone-and-promote` ← recommended | **clone-and-promote** — make a copy of the real table, iterate on the copy, swap to the real target only when it works. | Recommended for most production targets. |
-| `staging table + manual promotion` | **staging table + manual promotion** — write to a new side table; you decide later when (and whether) to publish it to the real target. | Highest control, requires a manual follow-up. |
+| `staged create-and-promote` | **staged create-and-promote** — build and validate a candidate, then atomically create the missing target from that candidate. | Use when the target does not yet exist. No human approval unless explicitly requested. |
+| `clone-and-promote` | **clone-and-promote** — clone an existing target, iterate on the clone, retain it until the selected promote step succeeds, and then promote it. | Only valid for an existing target. The promote step determines whether the final mutation is atomic. |
+| `staging table + manual promotion` | **staging table + manual promotion** — write and validate a side table, stop before changing the real target, and wait for the user's explicit approval to promote. | Creates a real approval gate. |
 | `iterate in place` | **iterate in place** — write directly to the real target. Failed attempts leave partial/garbage rows in production. | Only use for throwaway tables. |
 
-### Question 3. Promote step *(only if Question 2 = clone-and-promote)*
+### Question 3. Promote step *(only for staged create-and-promote or clone-and-promote)*
 
-**What this means:** Once the agent's code works on the clone, how
-should the verified result move from the clone onto the real table?
+**What this means:** Once the agent's code works on the candidate or clone, how
+should the verified result become the real table?
 
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
-| `re-run final code against real target` ← recommended | **re-run final code against real target** — throw away the clone, run the verified notebook/SQL one more time directly against the real target. Fresh data, proper lineage. | Recommended. |
+| `re-run final code against real target` | **re-run final code against real target** — retain the clone as evidence, then run the validated code against the real target. This final production write is not atomic and does not require human approval unless a gate is listed separately. | Use only when atomic promotion is unavailable or fresh-data execution is required. |
 | `data swap (INSERT OVERWRITE)` | **data swap (`INSERT OVERWRITE`)** — atomically replace the real target's contents with whatever is in the clone. Faster but no fresh-data guarantee. | |
-| `atomic rename` | **atomic rename** — the clone becomes the real target; the old real target is renamed with a timestamp suffix as a backup. | |
+| `atomic rename` | **atomic rename** — the candidate or clone becomes the real target; an existing real target is renamed with a timestamp suffix as a retained backup. | Safe fallback when supported. |
 
 ### Question 4. Re-run semantics
 
@@ -198,12 +304,14 @@ target table from a previous run, what should it do?
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
-| `fail if target already populated` ← recommended | **fail if target already populated** — hard stop with an error. Forces you to confirm the re-run intent explicitly. | Recommended. |
+| `fail if target already populated` | **fail if target already populated** — before any mutation, fail if the target already contains rows. This is a terminal safety policy, not a request for approval, and a confirmation message does not override it. | Safe when a second successful run is not required. |
 | `append (duplicates allowed)` | **append (duplicates allowed)** — just add more rows, don't check for duplicates. | Use only when duplicate rows are acceptable. |
-| `append with dedup key` | **append with dedup key** — you name a key column (e.g., `INVOICE_ID`); agent removes existing rows that match before inserting. | Best for incremental loads. |
+| `append with dedup key` | **append with dedup key** — for each target, use the supplied key columns to atomically replace matching rows and insert new rows. | Requires one or more stable keys per target. |
+| `reconcile idempotently` | **reconcile idempotently** — use the supplied key or partition scope so rerunning with the same inputs leaves target contents and counts unchanged. | Required when the outcome asks for idempotent or unchanged-count reruns. |
+| `verify desired state` | **verify desired state** — if the requested row mutation or schema change is already applied, report zero mutations and succeed; otherwise apply it once. | Default for Mutative and Schema migration tasks. |
 | `overwrite (truncate then write)` | **overwrite (truncate then write)** — delete everything in the target, then write. Destroys whatever was there. | Only for tables you fully own. |
 
-### Question 5. Schema evolution on real targets *(only if any write)*
+### Question 5. Schema evolution on real targets *(once per write target)*
 
 **What this means:** If the source data has new columns, missing
 columns, or different types than the target, what should the agent do?
@@ -212,7 +320,7 @@ This controls how much the table's shape is allowed to drift.
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
-| `locked` ← recommended | **locked — schema must match exactly, fail on mismatch** — the real target's columns and types are the contract; any drift is a hard error. | Recommended for prod tables. |
+| `locked` | **locked — schema must match exactly, fail on mismatch** — for an existing target, its columns and types are the contract; for a missing target, establish the explicitly requested or source-derived first schema and lock later writes to it. | Safe fallback for production tables. |
 | `auto-evolve (mergeSchema)` | **auto-evolve (`mergeSchema`)** — new columns from the source get added automatically. Risky if other consumers depend on the table's shape. | |
 | `type-widening only` | **type-widening only** — allows safe widening (e.g., `int → long`) but blocks new columns and narrowing types. | Middle-ground. |
 
@@ -223,7 +331,7 @@ end so the work is reproducible?
 
 | Option | Label shown to user | Notes |
 |---|---|---|
-| `let the agent decide` ← recommended | **let the agent decide** — usually a Fabric notebook capturing the steps. | Recommended. |
+| `let the agent decide` | **let the agent decide** — usually a Fabric notebook capturing the steps. | Used only when the outcome and task type do not decide the format. |
 | `notebook always` | **notebook always** — always save a Fabric notebook. | |
 | `don't save artifacts` | **don't save artifacts** — ephemeral, only chat messages preserved. | Skips Question 7. |
 
@@ -235,7 +343,7 @@ you can find it later?
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `let the agent decide` | **let the agent decide** | |
-| `workspace folder` ← recommended | **workspace folder (user-specified path)** — saved into the Fabric workspace at a path you provide, e.g., `ETL/notebooks/`. | **Hard rule:** if the workspace publish fails, the task must fail loudly — no silent fallback to Lakehouse Files. |
+| `workspace folder` | **workspace folder (user-specified path)** — saved into the Fabric workspace at a path you provide, e.g., `ETL/notebooks/`. | **Hard rule:** if the workspace publish fails, the task must fail loudly — no silent fallback to Lakehouse Files. |
 | `lakehouse Files` | **lakehouse Files** — saved under `Files/<path>/` inside the lakehouse. | Useful when workspace publish isn't available. |
 | `both` | **both** — workspace + Lakehouse mirror. Belt + suspenders. | |
 
@@ -248,130 +356,142 @@ work, but may cost more time.
 | Option | Label shown to user | Notes |
 |---|---|---|
 | `low` | **low** — fastest path; minimal exploration and straightforward validation. | User can choose this for simple read-only or low-risk work. |
-| `medium` ← default | **medium** — balanced budget with normal validation. | Always pre-filled by default. |
+| `medium` | **medium** — balanced budget with normal validation. | Always recommend this unless the user explicitly chooses another level. |
 | `high` | **high** — extra budget; the agent runs more experiments and considers more alternatives, validating more deeply before final writes. | User can choose this when complexity, ambiguity, write risk, schema risk, or rollback risk is high. |
 | `xhigh` (aliases: `max`, `extra high`, `ultra`) | **xhigh** — maximum budget; the agent runs many experiments across planning and validation, revisiting steps and comparing results to converge on the best outcome. Slowest and most thorough. | User can choose this for the hardest, riskiest, or most ambiguous work, where quality matters more than time or cost. |
 
-### Reasoning effort escalation guidance
+### Reasoning effort default
 
-Question 8 always defaults to `medium` in the recommendations card; do not auto-escalate or de-escalate by task type or complexity. The user may choose `low`, `high`, or `xhigh`.
+Always recommend `medium` when the user has not explicitly selected a
+reasoning-effort level. Do not infer `low`, `high`, or `xhigh` from task
+complexity, ambiguity, write risk, schema risk, or number of targets. Preserve
+an explicit user choice and allow the user to override `medium` from the card.
 
-- Choose `low` for small or straightforward work: simple read-only analysis, a narrow single-file/table task, few transforms, no destructive writes, and low ambiguity.
-- Keep `medium` (the default) for normal-complexity work: multiple steps, normal ingestion/transformation, moderate validation needs, or ordinary writes with standard safety settings.
-- Choose `high` for complex or risky work: ambiguous requirements, many resources, non-trivial joins/cleaning, mutative writes, schema changes, difficult rollback/promotion, or strict validation requirements.
-- Choose `xhigh` for the most demanding work: high ambiguity, large scope, risky mutations or schema changes, or strict validation — when it is worth having the agent run many experiments and take longer to converge on the best result.
+## Dynamic recommendation rules
 
-## Per-task-type recommendations matrix
+The task-type matrix is a fallback for unanswered decisions, not the source of
+truth for the final plan. Apply these higher-priority rules first:
 
-Single source of truth for asked questions and pre-filled options. *skip* = not asked; *n/a* = logically inapplicable; *hide* = hidden because nothing will be re-run-protected.
+| Signal or discovered fact | Derived recommendation |
+|---|---|
+| Target is missing | `staged create-and-promote`; schema establishes an explicit first version |
+| Target exists and the write replaces or mutates data | `clone-and-promote` with `atomic rename` when supported |
+| Outcome says `rerun`, `idempotent`, or `counts unchanged` | `reconcile idempotently`; collect key or partition scope |
+| Outcome says `append` or `incremental` | `append with dedup key`; collect key columns |
+| Outcome says `replace`, `rebuild`, or `full refresh` | `overwrite` with staged or cloned atomic promotion |
+| Outcome says `review`, `approve`, or `before publishing` | `staging table + manual promotion`; declare one explicit approval gate |
+| Mutative or schema change | `verify desired state` |
+| Explicit artifact path or name | preserve it; do not ask again |
+
+### Fallback matrix
+
+Use this table only for values still unresolved after applying explicit
+requirements and discovered facts. *skip* means the question is inapplicable.
 
 | | Exploration | Transformative ingest | Additive | Mutative | Schema migration | Unclear |
 |---|---|---|---|---|---|---|
-| **Question 1** Permission | all `read-only` | source `read-only`, target `write` | target `write` | target `write` | target `write` | default `read-only`, user picks |
-| **Question 2** Safety pattern | *skip* | `clone-and-promote` | *skip — additive doesn't iterate* | `clone-and-promote` | `staging table` | `clone-and-promote` |
-| **Question 3** Promote step | *skip* | `re-run final code` | *skip* | `re-run final code` | *n/a — DDL is its own promotion* | `re-run final code` |
-| **Question 4** Re-run semantics | *hide — n/a* | `fail if populated` | `append with dedup key` | `fail if populated` | `fail if populated` | `fail if populated` |
-| **Question 5** Schema evolution | *skip* | `locked` | `locked` | `locked` | *n/a — schema IS the change* | `locked` |
-| **Question 6** Artifact format | `don't save` | `notebook` | `notebook` | `notebook` | `notebook` | `let the agent decide` |
+| **Question 1** Permission | all `read-only` | source `read-only`, targets `write` | targets `write` | targets `write` | targets `write` | default `read-only`, user picks |
+| **Question 2** Safety pattern | *skip* | derive per target state | derive per target state | `clone-and-promote` | `clone-and-promote` | derive per target state |
+| **Question 3** Promote step | *skip* | `atomic rename` for cloned targets | `atomic rename` for cloned targets | `atomic rename` | `atomic rename` | `atomic rename` for cloned targets |
+| **Question 4** Re-run semantics | *skip* | `fail if target already populated` | `append with dedup key` | `verify desired state` | `verify desired state` | ask |
+| **Question 5** Schema evolution | *skip* | `locked` | `locked` | `locked` | *n/a — schema is the requested change* | `locked` |
+| **Question 6** Artifact format | `don't save artifacts` | `notebook always` | `notebook always` | `notebook always` | `notebook always` | `let the agent decide` |
 | **Question 7** Artifact destination | *skip* | `workspace folder` | `workspace folder` | `workspace folder` | `workspace folder` | `workspace folder` |
 | **Question 8** Reasoning effort | `medium` | `medium` | `medium` | `medium` | `medium` | `medium` |
 
-### Question count by task type
+## Skip and dependency rules
 
-| Task type | Questions asked | Count |
-|---|---|---|
-| Exploration | Question 1, Question 6, Question 8 | 3 |
-| Additive | Question 1, Question 4, Question 5, Question 6, Question 7, Question 8 | 6 |
-| Schema migration | Question 1, Question 2, Question 4, Question 6, Question 7, Question 8 | 6 |
-| Transformative ingest | Question 1, Question 2, Question 3, Question 4, Question 5, Question 6, Question 7, Question 8 | 8 |
-| Mutative | Question 1, Question 2, Question 3, Question 4, Question 5, Question 6, Question 7, Question 8 | 8 |
-| Unclear | Question 1, Question 2, Question 3, Question 4, Question 5, Question 6, Question 7, Question 8 | 8 |
+- Ask Questions 2, 4, and 5 once per write target.
+- Ask Question 3 only for a target whose Question 2 answer is
+  `staged create-and-promote` or `clone-and-promote`.
+- Skip Question 4 for a task with no write target.
+- If Question 6 is `don't save artifacts`, skip Question 7.
+- `append with dedup key` and `reconcile idempotently` remain unresolved until
+  their per-target keys or partition scopes are collected.
+- For Questions 2–5, `let the agent decide` delegates the choice to the intake
+  compiler, not to the remote run. Resolve it to a concrete per-target option
+  and show the resolved value before `accept`; never serialize `let the agent
+  decide` for write behavior.
+- `staging table + manual promotion` creates an approval gate; no other option
+  creates a gate merely because it is cautious or can fail.
 
-## Skip rules within a task type
+## Compact handoff contract
 
-After matrix pruning, two runtime conditional skips still apply:
+The service accepts at most **10,000 characters** in `instruction`. Target
+**9,500 characters or fewer** to preserve error-message and serialization
+headroom.
 
-- If Question 2 ≠ `clone-and-promote`, skip Question 3.
-- If Question 6 = `don't save artifacts`, skip Question 7.
+Preserve the user's complete outcome verbatim. The generated execution-plan
+block is subordinate to that character budget:
 
-## Rendered preamble template
+1. Measure the user outcome first.
+2. Reserve its full character count plus the `## User outcome` heading.
+3. Keep the generated operational block to at most **2,500 characters**, or
+   the smaller remaining amount needed to keep the final instruction at or
+   below 9,500 characters.
+4. Before `PUT /{taskId}`, write the final instruction to a temporary file and
+   run `python3 skills/project-osmos/scripts/check-instruction-length.py
+   --path <file> --limit 9500`.
+5. If it does not fit, remove generated verbosity—not user text. If the
+   complete handoff still exceeds 9,500 characters, use the
+   [oversized instruction fallback](oversized-instructions.md). Upload the
+   exact complete handoff to the selected Lakehouse and submit only its
+   lossless bootstrap reference. Never paraphrase, truncate, or ask the user
+   to shorten the outcome.
 
-After the questionnaire, prepend this **binding** block verbatim to the user's instruction before `PUT /{taskId}`; it overrides anything below it.
+The remote handoff is **not** a copy of the questionnaire. Include only:
+
+- selected answers that affect execution;
+- the concise executable behavior of each selected answer;
+- required parameters such as keys, scopes, paths, limits, and gates;
+- exact failure behavior where ambiguity would be unsafe.
+
+Do not include unselected options, card `Why:` text, general risk education,
+question subtitles, repeated warnings, or `n/a` fields. Those remain in
+`intake.answers` and the dashboard audit state. Define shared rules once rather
+than repeating them for every resource.
+
+Use this compact shape:
 
 ```text
-## Operational constraints (binding — overrides anything below)
-- Task type: <classified type>
-- Per-resource permission:
-  - <resource 1>: <read-only | write>
-  - <resource 2>: <read-only | write>
-- Safety pattern for writes: <answer | n/a>
-- Promote step: <answer | n/a>
-- Re-run semantics: <answer>
-- Schema evolution: <answer | n/a>
-- Artifact format: <answer>
-- Artifact destination: <answer | n/a>
-- Reasoning effort: <low | medium | high | xhigh>
-- Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
-- If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
-
 ## User outcome
 <original instruction text, verbatim>
+
+## Execution plan
+Task: name=<name>; type=<type>; mode=autonomous; gates=<none|explicit gate>; effort=<level>
+Resources:
+- <resource>: <source|intermediate|final>, <read-only|write>, state=<state>[, scope=<scope>]
+Writes:
+- <target>: safety=<choice> (<concise behavior>); promote=<choice> (<concise behavior>); rerun=<choice> (<exact populated-target behavior>, key/scope=<value>); schema=<choice> (<concise behavior>); approval=<none|gate>; cap=<value if applicable>
+Artifact: <format>; name=<name|agent choice>; destination=<destination>; publish failure=fail, no fallback
+Counts: report literal count()/SQL outputs.
+Ambiguity: fail once naming the conflict and required input; never repeat a question.
 ```
 
-For skipped or *n/a* questions, render `n/a` instead of dropping the line so the audit trail stays complete and diffable.
+Omit the `Writes`, `Artifact`, `Counts`, gate, scope, or cap clauses when they
+do not apply. Keep one resource or target to one line. A label without its
+selected behavior remains invalid, but a concise behavior clause is enough;
+do not paste the full questionnaire definition.
 
-`Reasoning effort` is the orchestrator-facing budget hint:
+### Compact Guidewire example
 
-- `low` — fastest direct plan, minimal exploration, and basic validation suitable for simple read-only or low-risk work.
-- `medium` (default) — balanced budget with normal validation.
-- `high` — extra budget: more experiments and alternatives, with deeper validation before risky writes.
-- `xhigh` — maximum budget: many experiments across planning and validation, revisiting steps to converge on the best result. Slowest and most thorough; for the hardest or riskiest work.
-
-## Example renders
-
-### Exploration
-
-User: "Profile the Invoice table. Show me row count, null counts per column, and the top 5 invoice amounts."
+Assume read-only discovery confirmed both targets are missing and the user
+confirmed `claim_id` as the stable identifier:
 
 ```text
-## Operational constraints (binding — overrides anything below)
-- Task type: Exploration
-- Per-resource permission:
-  - Invoice (table): read-only
-- Safety pattern for writes: n/a
-- Promote step: n/a
-- Re-run semantics: n/a
-- Schema evolution: n/a
-- Artifact format: don't save artifacts
-- Artifact destination: n/a
-- Reasoning effort: medium
-- Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
-- If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
-
 ## User outcome
-Profile the Invoice table. Show me row count, null counts per column, and the top 5 invoice amounts.
-```
+<original instruction text, verbatim>
 
-### Transformative ingest (re-run with the intake)
-
-User: "In `sales_lakehouse` there is a folder called `Invoice` with invoice files and a table called `Invoice` for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in `ETL/notebooks/` as `invoice-processing`."
-
-```text
-## Operational constraints (binding — overrides anything below)
-- Task type: Transformative ingest
-- Per-resource permission:
-  - Invoice (folder): read-only
-  - Invoice (table): write
-- Safety pattern for writes: clone-and-promote
-- Promote step: re-run final code against real target
-- Re-run semantics: fail if target already populated
-- Schema evolution: locked
-- Artifact format: notebook
-- Artifact destination: workspace folder → ETL/notebooks/
-- Reasoning effort: medium
-- Report all row counts and mutation counts as the literal output of `count()` / SQL — never paraphrased.
-- If artifact destination is a workspace folder and publish fails, fail the task; do not silently fall back to Lakehouse Files.
-
-## User outcome
-In sales_lakehouse there is a folder called Invoice with invoice files and a table called Invoice for the final schema. Write a notebook to ingest the invoices into the Invoice table. Save the notebook in ETL/notebooks/ as invoice-processing.
+## Execution plan
+Task: name=Attempt#1-Guidewire Claims only; type=Transformative ingest; mode=autonomous; gates=none; effort=medium
+Resources:
+- Files/guidewire/claimcenter/Claim.csv: source, read-only, state=existing, scope=exact file
+- bronze_guidewire_claim: intermediate, write, state=missing
+- gold_claim_starter: final, write, state=missing
+Writes:
+- bronze_guidewire_claim: safety=staged create-and-promote (validate candidate, then atomically create); promote=atomic rename (retain old target as backup if present); rerun=reconcile idempotently (same input leaves data/count unchanged, key=claim_id); schema=locked (establish first schema, reject later drift); approval=none
+- gold_claim_starter: safety=staged create-and-promote (validate candidate, then atomically create); promote=atomic rename (retain old target as backup if present); rerun=reconcile idempotently (same input leaves data/count unchanged, key=claim_id); schema=locked (establish first schema, reject later drift); approval=none
+Artifact: notebook; name=agent choice; destination=workspace:ClaimsTeam/notebooks/guidewire-claims; publish failure=fail, no fallback
+Counts: report literal count()/SQL outputs.
+Ambiguity: fail once naming the conflict and required input; never repeat a question.
 ```

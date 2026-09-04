@@ -309,6 +309,7 @@ Licensed under the MIT license.
     .banner.retrying       { background: #1f2f3d; border-color: #2f5f8a; color: #79b8ff; }
     .banner.retry-trigger  { background: #3d2e0a; border-color: #8a6d1f; color: #f0c674; }
     .banner.auth-broken    { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
+    .banner.elicitation-loop { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
     .banner code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; background: rgba(255,255,255,0.06); border-radius: 3px; }
     .banner .dismiss-btn {
       margin-left: auto; background: transparent; border: 1px solid currentColor;
@@ -530,7 +531,7 @@ Licensed under the MIT license.
         ],
         user_outcome: "Create a starter data-quality exploration for a Fabric lakehouse table and explain the recommended next steps."
       },
-      spec: "## Operational constraints\n\n- Treat this as preview data until a real state.js file is written.\n- Start read-only: inspect schemas, row counts, nulls, and duplicate keys before proposing writes.\n- Surface notebook and table artifacts only after they are actually created.",
+      spec: "## Execution plan\n\n- Treat this as preview data until a real state.js file is written.\n- Start read-only: inspect schemas, row counts, nulls, and duplicate keys before proposing writes.\n- Surface notebook and table artifacts only after they are actually created.",
       summary: "Preview a Project Osmos lakehouse data-quality exploration with sample intake, activity, and artifact placeholders.",
       messages: [
         {
@@ -1144,7 +1145,7 @@ Licensed under the MIT license.
 
       function renderSpec(state) {
         var spec = state.spec || "";
-        var specCard = card("spec", "Instruction sent to orchestrator (intake preamble + your request)", [
+        var specCard = card("spec", "Instruction sent to orchestrator (your request + execution plan)", [
           el("div", { class: "card-toolbar" }, [
             mdToggleBtn(),
             el("button", { class: "copy-btn", onclick: function (e) { e.stopPropagation(); copy(spec); } }, ["Copy spec"])
@@ -1303,15 +1304,26 @@ Licensed under the MIT license.
         var recovery = state.recovery || {};
         var s = taskStatus(task);
 
-        // 1. Terminal (poller exited) — highest priority. Read from
-        // state.terminal which the daemon mirrors from terminal.json so
-        // file:// dashboards can see it without fetch().
+        // 1. Repeated clarification — keep visible even after the run becomes
+        // terminal so the user can see why intervention is required.
+        if (recovery.possible_elicitation_loop) {
+          var loopCount = Number(recovery.elicitation_loop_count || 0);
+          var loopText = recovery.elicitation_loop_text || "The same clarification was requested repeatedly.";
+          return el("div", { class: "banner elicitation-loop" }, [
+            "⚠ Possible elicitation loop (" + loopCount + " similar questions). " +
+            "Project Osmos needs a resolved constraint instead of another retry. Last question: " +
+            loopText
+          ]);
+        }
+
+        // 2. Terminal (poller exited). Read from state.terminal which the
+        // daemon mirrors from terminal.json so file:// dashboards can see it.
         if (terminal && terminal.reason) {
           // Terminal state is shown via the closure node in the activity panel.
           return null;
         }
 
-        // 2. Auth broken — refresh failing, last_polled_at is intentionally frozen.
+        // 3. Auth broken — refresh failing, last_polled_at is intentionally frozen.
         if (recovery.auth_status === "broken") {
           var since = recovery.last_auth_error_at
             ? " since " + (fmtTs(recovery.last_auth_error_at) || recovery.last_auth_error_at)
@@ -1324,7 +1336,7 @@ Licensed under the MIT license.
           ]);
         }
 
-        // 3. Stale poll — alive but quiet for > 5 minutes (a real signal the
+        // 4. Stale poll — alive but quiet for > 5 minutes (a real signal the
         // process may have wedged or the machine slept).
         if (!isTerminal(s)) {
           var mins = staleMinutes(task);
@@ -1335,7 +1347,7 @@ Licensed under the MIT license.
           }
         }
 
-        // 4. Auto-retrying — currently mid-recovery, informational only.
+        // 5. Auto-retrying — currently mid-recovery, informational only.
         // Suppressed when the more detailed retry-trigger banner is also
         // showing (renderRetryTriggerBanner) so we don't render two
         // amber strips saying basically the same thing.

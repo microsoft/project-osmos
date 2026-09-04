@@ -45,6 +45,11 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from python_runtime import require_supported_python
+
+
+require_supported_python()
+
 
 PBI_RESOURCE = "https://analysis.windows.net/powerbi/api"
 DEFAULT_FABRIC_API_HOST = "https://api.fabric.microsoft.com"

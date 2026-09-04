@@ -12,9 +12,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from python_runtime import require_supported_python
+from task_status import is_terminal_status
 
-TERMINAL_STRINGS = {"completed", "failed", "cancelled", "canceled"}
-STATUS_BY_CODE = {0: "Created", 1: "Running", 2: "Cancelling", 3: "Cancelled", 4: "Completed", 5: "Failed"}
+require_supported_python()
+
 ASSISTANT_ROLES = {1, "1", "Assistant", "assistant"}
 
 
@@ -25,21 +27,6 @@ def request_json(url: str, auth_header: str, timeout: int) -> dict[str, Any]:
     if not body:
         return {}
     return json.loads(body.decode("utf-8"))
-
-
-def is_terminal(status: Any) -> bool:
-    label: str
-    if isinstance(status, str):
-        stripped = status.strip()
-        if stripped.isdigit():
-            label = STATUS_BY_CODE.get(int(stripped), stripped)
-        else:
-            label = stripped
-    elif isinstance(status, int) and not isinstance(status, bool):
-        label = STATUS_BY_CODE.get(status, str(status))
-    else:
-        return False
-    return label.strip().lower() in TERMINAL_STRINGS
 
 
 def iter_assistant_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -101,7 +88,7 @@ def main() -> int:
                 )
             )
 
-            if is_terminal(status) or error_message:
+            if is_terminal_status(status) or error_message:
                 break
         except urllib.error.HTTPError as exc:
             print(json.dumps({"type": "http_error", "status": exc.code, "url": exc.url}), file=sys.stderr)

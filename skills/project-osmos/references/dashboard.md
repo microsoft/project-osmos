@@ -60,20 +60,29 @@ window.__STATE = {
     capacity_id: "guid | null"
   },
   intake: {
+    contract_version: 2,
+    contract_sha256: "sha256 hex of spec",
+    accepted_at: "iso8601",
     project_type: "Exploration" | "Transformative ingest" | "Additive" | "Mutative" | "Schema migration" | "Unclear",
     classification_confidence: "high" | "medium" | "low",
     answers: [
       {
         id: "Question 1" | "Question 2" | "Question 3" | "Question 4" | "Question 5" | "Question 6" | "Question 7" | "Question 8" | "Question 1a" | "Question 1b" | ...,
         question: "string (the What this means subtitle)",
-        answer: "string (the option label, e.g. clone-and-promote)",
-        recommended: true | false,
-        scope: "string | null"
+        answer: "string (the final canonical option label)",
+        executable_meaning: "string",
+        recommended_answer: "string",
+        selection_source: "explicit_user_requirement" | "discovered_fact" | "task_type_fallback" | "user_override",
+        why: "string (the task-specific recommendation reason shown to the user)",
+        scope: "stable resource or target identifier | null",
+        parameters: "object (for example key columns, path, source glob, or mutation cap)"
       }
     ],
-    user_outcome: "string (verbatim user instruction)"
+    user_outcome: "string (verbatim user instruction)",
+    handoff_mode: "inline" | "onelake_reference",
+    instruction_path: "Files/... | null"
   },
-  spec: "string (the rendered ## Operational constraints block, verbatim)",
+  spec: "string (the compact rendered ## Execution plan block, verbatim)",
   summary: "string  // REQUIRED. One plain-English sentence ≤180 chars describing what the task does. Author from the user instruction; do not quote verbatim. See the Initial-seed checklist for examples.",
   messages: [
     {
@@ -99,7 +108,6 @@ window.__STATE = {
     notebook: { workspace_path: "string", url: "string | null" } | null,
     table:    { lakehouse_path: "string", url: "string | null" } | null
   },
-
   // Written by scripts/dashboard-poller.py. Absent before the first poll.
   // The dashboard uses this to render the auto-retry pill, the
   // auth-broken banner, and the "↻ Auto-retry in progress" notice.
@@ -119,6 +127,15 @@ window.__STATE = {
     token_refreshed_at: "iso8601 | null",
     token_refresh_count: 0,
     token_refresh_configured: true,
+
+    // Set when the same assistant clarification intent is observed at least
+    // three times without intervening non-elicitation assistant progress.
+    // Tool/system messages remain audit-only. Repeated elicitation does not
+    // advance last_progress_at.
+    possible_elicitation_loop: true | false,
+    elicitation_loop_count: 0,
+    elicitation_loop_text: "redacted string | null",
+    elicitation_loop_detected_at: "iso8601 | null",
 
     // ----- mid-run-error visibility (sticky across the wipe) -----
     // When the daemon decides to auto-retry the documented Spark
@@ -238,21 +255,35 @@ value is `null`:
   acquiring"`) or `null`.
 
 **`intake` (object)** — required at seed time:
+- `intake.contract_version` — `2`.
+- `intake.contract_sha256` — SHA-256 of the exact `spec` string.
+- `intake.accepted_at` — ISO 8601 timestamp when reconciliation passed.
 - `intake.project_type` — the classified task type
   (`"Exploration" | "Transformative ingest" | "Additive" | "Mutative" |
   "Schema migration" | "Unclear"`).
 - `intake.classification_confidence` — `"high"`, `"medium"`, or
   `"low"`.
 - `intake.answers` — an array of
-  `{ id, question, answer, recommended, scope }` objects, one per
+  `{ id, question, answer, executable_meaning, recommended_answer,
+  selection_source, why, scope, parameters }` objects, one per
   question that was rendered (or auto-accepted from the recommendations
   card). `id` is the canonical question key (`"Question 1"`,
   `"Question 1a"`, …) per the schema example above.
 - `intake.user_outcome` — the user's verbatim instruction string (task instructions plus any additional guidance from the "Anything else I should know?" prompt, when the user provided extra context).
+- `intake.handoff_mode` — `"inline"` when the complete handoff is submitted
+  directly or `"onelake_reference"` when the exact handoff is uploaded.
+- `intake.instruction_path` — the uploaded `Files/...` path for
+  `"onelake_reference"`; otherwise `null`.
 
-**`spec` (string)** — the rendered `## Operational constraints` block,
-verbatim. Same string that was appended to the task instruction sent
-to the orchestrator.
+**`spec` (string)** — the rendered `## Execution plan` block,
+verbatim. It must hash to `intake.contract_sha256`. For an inline handoff,
+append it after the verbatim `## User outcome` in both task creation and the
+initial user message. For an
+`onelake_reference` handoff, include it in the uploaded exact handoff and use
+the same short bootstrap reference for task creation and the initial user
+message. Keep the full question explanations, recommendation rationale, and
+provenance in `intake.answers`; do not copy that verbose audit detail into
+`spec`.
 
 **`summary` (string, required)** — **one single plain-English sentence**
 describing what this task does, authored by the agent from the user's
@@ -299,8 +330,11 @@ result in empty dashboard panels until the agent corrects the file.
 
 ## Open contract
 
-After the initial write, the skill opens `dashboard.html` in the user's
-default browser:
+After the initial write, the skill opens the primary task view in the user's
+default browser.
+
+
+When no Fabric task-page URL is available, open `dashboard.html`:
 
 | Platform | Command |
 |---|---|
@@ -309,8 +343,8 @@ default browser:
 | Windows | `start "" "file:///<path>"` — convert backslashes to forward slashes (e.g., `file:///C:/Users/me/dashboard.html`) |
 
 If the open command fails (return code non-zero, command not found),
-the skill prints the absolute path so the user can click it manually
-and continues. A failed open must never block the run.
+the skill prints the URL or absolute path so the user can open it manually and
+continues. A failed open must never block the run.
 
 The skill must also print the dashboard URL in chat so users who closed
 the tab or are on a remote machine can reach it.

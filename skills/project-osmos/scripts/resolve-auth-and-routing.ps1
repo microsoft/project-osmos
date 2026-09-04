@@ -41,31 +41,69 @@ function Resolve-PythonInvocation {
     param([string]$RequestedCommand)
 
     if (-not [string]::IsNullOrWhiteSpace($RequestedCommand)) {
-        return @{
-            FileName = $RequestedCommand
+        $requested = Get-Command $RequestedCommand -ErrorAction SilentlyContinue
+        if ($null -eq $requested) {
+            throw "Python command not found: $RequestedCommand"
+        }
+        $requestedInvocation = @{
+            FileName = $requested.Source
             PrefixArgs = @()
         }
+        $probe = Test-PythonInvocation -Invocation $requestedInvocation
+        if (-not $probe.Compatible) {
+            throw (
+                "Project Osmos helpers require Python 3.11 or newer; " +
+                "$($requestedInvocation.FileName) reported Python $($probe.Version). " +
+                "Activate or expose a compatible existing interpreter. " +
+                "No packages or environments were changed."
+            )
+        }
+        return $requestedInvocation
     }
 
-    foreach ($candidate in @("python3", "python")) {
-        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+    $candidates = @(
+        @{ Name = "python"; PrefixArgs = @() },
+        @{ Name = "python3"; PrefixArgs = @() },
+        @{ Name = "py"; PrefixArgs = @("-3") }
+    )
+    $checked = @()
+    foreach ($candidate in $candidates) {
+        $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue
         if ($null -ne $command) {
-            return @{
+            $invocation = @{
                 FileName = $command.Source
-                PrefixArgs = @()
+                PrefixArgs = @($candidate.PrefixArgs)
             }
+            $probe = Test-PythonInvocation -Invocation $invocation
+            if ($probe.Compatible) {
+                return $invocation
+            }
+            $checked += "$($command.Source) (Python $($probe.Version))"
         }
     }
 
-    $pyLauncher = Get-Command "py" -ErrorAction SilentlyContinue
-    if ($null -ne $pyLauncher) {
-        return @{
-            FileName = $pyLauncher.Source
-            PrefixArgs = @("-3")
-        }
-    }
+    $checkedText = if ($checked.Count -gt 0) { $checked -join ", " } else { "none found" }
+    throw (
+        "Project Osmos helpers require an existing Python 3.11 or newer interpreter. " +
+        "Checked: $checkedText. Activate or expose a compatible interpreter, or pass " +
+        "-PythonCommand. No packages or environments were changed."
+    )
+}
 
-    throw "Could not find python3, python, or py. Install Python or pass -PythonCommand."
+function Test-PythonInvocation {
+    param([hashtable]$Invocation)
+
+    $probeArgs = @($Invocation.PrefixArgs) + @(
+        "-c",
+        "import sys; print('.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+    )
+    $versionOutput = & $Invocation.FileName @probeArgs 2>$null
+    $exitCode = $LASTEXITCODE
+    $reportedVersion = if ($versionOutput) { @($versionOutput)[-1] } else { "unknown" }
+    return @{
+        Compatible = $exitCode -eq 0
+        Version = $reportedVersion
+    }
 }
 
 $python = Resolve-PythonInvocation -RequestedCommand $PythonCommand
