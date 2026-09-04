@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import urllib.error
@@ -264,6 +266,13 @@ def detect_az_user() -> str | None:
         return None
 
 
+def read_private_token_file(path: Path) -> str:
+    with path.open(encoding="utf-8") as token_file:
+        if os.name != "nt" and stat.S_IMODE(os.fstat(token_file.fileno()).st_mode) & 0o077:
+            raise PermissionError("--token-file must not be accessible by group or other users")
+        return token_file.read().strip()
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", required=True, help="Task base URL up to and including /aichat")
@@ -281,7 +290,7 @@ def main() -> int:
     args = p.parse_args()
 
     try:
-        token = args.token_file.read_text(encoding="utf-8").strip()
+        token = read_private_token_file(args.token_file)
     except OSError as exc:
         print(f"error: unable to read token file {args.token_file}: {exc}", file=sys.stderr)
         return 2

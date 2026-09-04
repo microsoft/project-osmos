@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -42,6 +44,29 @@ def load_post_user_message():
 
 
 post_user_message = load_post_user_message()
+
+
+class TokenFileSecurityTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX file modes are not enforced on Windows")
+    def test_group_readable_token_file_is_rejected_before_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "mwc-token"
+            token_file.write_text("secret", encoding="utf-8")
+            token_file.chmod(0o640)
+
+            with self.assertRaisesRegex(
+                PermissionError,
+                "--token-file must not be accessible by group or other users",
+            ):
+                post_user_message.read_private_token_file(token_file)
+
+    def test_private_token_file_is_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "mwc-token"
+            token_file.write_text("secret\n", encoding="utf-8")
+            token_file.chmod(0o600)
+
+            self.assertEqual("secret", post_user_message.read_private_token_file(token_file))
 
 
 class DynamicLoaderIsolationTests(unittest.TestCase):
