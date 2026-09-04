@@ -80,7 +80,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-TERMINAL_STRINGS = {"completed", "failed", "cancelled", "canceled"}
+from python_runtime import require_supported_python
+from task_status import is_terminal_status as is_terminal
+from task_status import status_label
+
+require_supported_python()
 
 # Normalized phrase tokens for the documented retryable Spark statement
 # transient. We require *all* of these phrases, in order, after lowercasing
@@ -95,18 +99,6 @@ RETRYABLE_PHRASES = ("run failed", "executing statements", "spark session", "ret
 # this check is reached.
 AUTH_BODY_HINTS = ("unauthorized", "token", "invalid_token", "authentication", "auth", "expired")
 
-# The orchestrator normally emits string status values:
-# Created, Running, Cancelling, Cancelled, Completed, Failed.
-# Some deployed services have also returned the numeric enum index
-# instead (for example, status=1 mid-run), so we coerce defensively. The
-# numeric mapping MUST preserve the documented status order, including
-# Cancelling. An earlier revision of this map had
-# 2=Completed/3=Failed/4=Cancelled, which was wrong: it skipped Cancelling
-# entirely and would silently mis-render terminal states.
-#   0=Created, 1=Running, 2=Cancelling, 3=Cancelled, 4=Completed, 5=Failed
-# Unknown numerics fall through as "Status N".
-STATUS_BY_CODE = {0: "Created", 1: "Running", 2: "Cancelling", 3: "Cancelled", 4: "Completed", 5: "Failed"}
-#
 # Expected message role values are "User", "Assistant", and "System".
 # Like status, some deployed services have also serialized roles as
 # numeric or stringified-digit indices in the wire payload:
@@ -227,35 +219,6 @@ def http_request(
 
 # ----------------------------- helpers -----------------------------
 
-def status_label(s: Any) -> str:
-    """Coerce a task status value into a clean display string.
-
-    The task API usually returns string status labels, but deployed
-    Some deployed services can return numeric codes (see STATUS_BY_CODE
-    comment block above). This helper handles both: numeric → mapped label, string →
-    stripped, null/empty → "Created".
-    """
-    if s is None:
-        return "Created"
-    if isinstance(s, bool):
-        return str(s)
-    if isinstance(s, int):
-        return STATUS_BY_CODE.get(s, "Status " + str(s))
-    if isinstance(s, str):
-        stripped = s.strip()
-        if not stripped:
-            return "Created"
-        # API sometimes returns the numeric code as a stringified digit.
-        if stripped.isdigit():
-            return STATUS_BY_CODE.get(int(stripped), "Status " + stripped)
-        return stripped
-    return str(s)
-
-
-def is_terminal(status: Any) -> bool:
-    return status_label(status).lower() in TERMINAL_STRINGS
-
-
 def int_or_zero(value: Any) -> int:
     try:
         return int(value or 0)
@@ -285,6 +248,137 @@ def role_label(role: Any) -> str:
 def normalize_text(text: str) -> str:
     """Collapse internal whitespace for dedup comparison."""
     return " ".join((text or "").split())
+
+
+ELICITATION_MARKERS = (
+    "please confirm",
+    "please clarify",
+    "reply with",
+    "does the original task",
+    "do you approve",
+    "what exactly is gated",
+)
+ELICITATION_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "before",
+    "does",
+    "for",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "me",
+    "of",
+    "or",
+    "please",
+    "that",
+    "the",
+    "this",
+    "to",
+    "until",
+    "with",
+    "you",
+    "your",
+}
+
+
+def is_elicitation(text: str) -> bool:
+    """Return whether an assistant message is asking the user for a decision."""
+    normalized = normalize_text(text).lower()
+    return "?" in normalized or any(marker in normalized for marker in ELICITATION_MARKERS)
+
+
+def elicitation_terms(text: str) -> set[str]:
+    """Extract stable terms for conservative repeated-question comparison."""
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalize_text(text).lower())
+        if len(token) > 1 and token not in ELICITATION_STOPWORDS
+    }
+
+
+def canonical_elicitation_intent(text: str) -> str | None:
+    """Map common short approval questions to a stable intent."""
+    if not is_elicitation(text):
+        return None
+    terms = elicitation_terms(text)
+    if {"gate", "gated", "gates"} & terms:
+        return "approval_gate"
+    approval_terms = {
+        "approval",
+        "approve",
+        "authorization",
+        "authorize",
+        "confirm",
+        "confirmation",
+        "continue",
+        "permission",
+        "proceed",
+    }
+    if approval_terms & terms:
+        return "approval_to_proceed"
+    return None
+
+
+def same_elicitation_intent(left: str, right: str) -> bool:
+    """Detect exact or strongly overlapping clarification questions."""
+    if not (is_elicitation(left) and is_elicitation(right)):
+        return False
+    if normalize_text(left).casefold() == normalize_text(right).casefold():
+        return True
+    left_intent = canonical_elicitation_intent(left)
+    right_intent = canonical_elicitation_intent(right)
+    if left_intent is not None and left_intent == right_intent:
+        return True
+    left_terms = elicitation_terms(left)
+    right_terms = elicitation_terms(right)
+    if min(len(left_terms), len(right_terms)) < 6:
+        return False
+    overlap = len(left_terms & right_terms)
+    shorter = min(len(left_terms), len(right_terms))
+    return overlap >= 6 and overlap / shorter >= 0.70
+
+
+def repeated_elicitation_count(existing: list[dict[str, Any]], text: str) -> int:
+    """Count consecutive matching questions since visible assistant progress."""
+    if not is_elicitation(text):
+        return 0
+    count = 1
+    for message in reversed(existing[-30:]):
+        if message.get("role") != "assistant":
+            continue
+        if not same_elicitation_intent(str(message.get("text") or ""), text):
+            break
+        count += int(message.get("repeats", 1))
+    return count
+
+
+def record_elicitation_loop(
+    stats: MergeStats,
+    message: dict[str, Any],
+    text: str,
+    count: int,
+) -> None:
+    """Record a possible loop on both the visible message and merge stats."""
+    if count < 3:
+        return
+    message["possible_elicitation_loop"] = True
+    message["elicitation_loop_count"] = count
+    stats.possible_elicitation_loop = True
+    stats.elicitation_loop_count = count
+    stats.elicitation_loop_text = text
+    stats.latest_progress_assistant_ts = None
+    stats.latest_progress_assistant_seq = None
+
+
+def clear_elicitation_loop(stats: MergeStats) -> None:
+    """Clear aggregate loop state after later assistant progress."""
+    stats.possible_elicitation_loop = False
+    stats.elicitation_loop_count = 0
+    stats.elicitation_loop_text = None
 
 
 def now_iso() -> str:
@@ -490,6 +584,11 @@ class MergeStats:
     collapsed_repeats: int = 0
     latest_assistant_ts: str | None = None
     latest_assistant_seq: int | None = None  # poller-local monotonic seq, used as retry-clear watermark
+    latest_progress_assistant_ts: str | None = None
+    latest_progress_assistant_seq: int | None = None
+    possible_elicitation_loop: bool = False
+    elicitation_loop_count: int = 0
+    elicitation_loop_text: str | None = None
 
     @property
     def any_change(self) -> bool:
@@ -537,6 +636,15 @@ def merge_messages(existing: list[dict[str, Any]], polled: list[dict[str, Any]])
                     if mid not in collapsed_ids:
                         collapsed_ids.append(mid)
                 stats.collapsed_repeats += 1
+                if role == "assistant" and is_elicitation(text):
+                    record_elicitation_loop(
+                        stats,
+                        last,
+                        text,
+                        repeated_elicitation_count(existing[:-1], text)
+                        + int(last.get("repeats", 1))
+                        - 1,
+                    )
                 continue
 
         entry = {
@@ -580,6 +688,12 @@ def merge_messages(existing: list[dict[str, Any]], polled: list[dict[str, Any]])
             stats.assistant_appended += 1
             stats.latest_assistant_ts = ts
             stats.latest_assistant_seq = entry["seq"]
+            repeat_count = repeated_elicitation_count(existing[:-1], text)
+            record_elicitation_loop(stats, entry, text, repeat_count)
+            if repeat_count < 3:
+                clear_elicitation_loop(stats)
+                stats.latest_progress_assistant_ts = ts
+                stats.latest_progress_assistant_seq = entry["seq"]
         elif role == "user":
             stats.user_appended += 1
 
@@ -841,6 +955,10 @@ class RecoveryState:
     # give-up. Reset to 0 on each successful poll.
     auth_blind_seconds_accumulated: float = 0.0
     visibility_lost_at_monotonic: float | None = None
+    possible_elicitation_loop: bool = False
+    elicitation_loop_count: int = 0
+    elicitation_loop_text: str | None = None
+    elicitation_loop_detected_at: str | None = None
 
     # ----- mid-run-error visibility (sticky across the wipe) -----
     # When the daemon decides to auto-retry, it wipes task.completed_at /
@@ -875,6 +993,10 @@ class RecoveryState:
             "auth_broken_started_at": self.auth_broken_started_at,
             "auth_blind_seconds_accumulated": self.auth_blind_seconds_accumulated,
             "last_retried_signature": self.last_retried_signature,
+            "possible_elicitation_loop": self.possible_elicitation_loop,
+            "elicitation_loop_count": self.elicitation_loop_count,
+            "elicitation_loop_text": self.elicitation_loop_text,
+            "elicitation_loop_detected_at": self.elicitation_loop_detected_at,
             "last_trigger_error": self.last_trigger_error,
             "last_trigger_error_at": self.last_trigger_error_at,
             "last_trigger_error_signature": self.last_trigger_error_signature,
@@ -905,6 +1027,10 @@ class RecoveryState:
         self.auth_blind_seconds_accumulated = float_or_zero(
             rec.get("auth_blind_seconds_accumulated")
         )
+        self.possible_elicitation_loop = bool(rec.get("possible_elicitation_loop"))
+        self.elicitation_loop_count = int_or_zero(rec.get("elicitation_loop_count"))
+        self.elicitation_loop_text = rec.get("elicitation_loop_text")
+        self.elicitation_loop_detected_at = rec.get("elicitation_loop_detected_at")
         if self.auth_status == "broken":
             broken_started_epoch = parse_utc_iso_epoch(
                 self.auth_broken_started_at or self.last_auth_error_at
@@ -1240,13 +1366,23 @@ def _restore_failed_task_block(
 
 
 def _update_progress_and_trigger(recovery: RecoveryState, merge_stats: MergeStats) -> None:
-    """Advance `recovery.last_progress_at` on a fresh assistant append (NOT
-    on collapsed repeats or user messages) and clear the sticky
-    mid-run-error trigger banner once the orchestrator has emitted past the
-    last-retry seq watermark."""
-    if not (merge_stats.assistant_appended and merge_stats.latest_assistant_ts):
+    """Advance progress only for non-looping assistant output."""
+    if merge_stats.possible_elicitation_loop:
+        recovery.possible_elicitation_loop = True
+        recovery.elicitation_loop_count = merge_stats.elicitation_loop_count
+        recovery.elicitation_loop_text = redact_error(
+            merge_stats.elicitation_loop_text,
+            max_len=500,
+        )
+        recovery.elicitation_loop_detected_at = now_iso()
+    elif merge_stats.assistant_appended:
+        recovery.possible_elicitation_loop = False
+        recovery.elicitation_loop_count = 0
+        recovery.elicitation_loop_text = None
+        recovery.elicitation_loop_detected_at = None
+    if not merge_stats.latest_progress_assistant_ts:
         return
-    recovery.last_progress_at = merge_stats.latest_assistant_ts
+    recovery.last_progress_at = merge_stats.latest_progress_assistant_ts
     # Reset blind-time accumulator on fresh progress so old auth
     # outages don't get double-counted against future silences.
     recovery.auth_blind_seconds_accumulated = 0.0
@@ -1262,8 +1398,8 @@ def _update_progress_and_trigger(recovery: RecoveryState, merge_stats: MergeStat
     if (
         recovery.last_trigger_error
         and recovery.last_retry_message_seq is not None
-        and merge_stats.latest_assistant_seq is not None
-        and merge_stats.latest_assistant_seq > recovery.last_retry_message_seq
+        and merge_stats.latest_progress_assistant_seq is not None
+        and merge_stats.latest_progress_assistant_seq > recovery.last_retry_message_seq
     ):
         recovery.last_trigger_error = None
         recovery.last_trigger_error_at = None

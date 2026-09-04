@@ -163,6 +163,8 @@ def require_incremented(
     base_version: tuple[int, int, int],
     label: str,
     issues: list[Issue],
+    *,
+    allow_version_skip: bool = False,
 ) -> None:
     if is_preview_blocked_version(current_version):
         issues.append(
@@ -193,6 +195,9 @@ def require_incremented(
         )
         return
 
+    if allow_version_skip:
+        return
+
     allowed_versions = next_increment_versions(base_version)
     if current_version not in allowed_versions:
         issues.append(
@@ -220,12 +225,23 @@ def resolve_current_plugin_version(
     return None, None
 
 
-def check_version_bump(base_manifest: dict[str, Any], current_manifest: dict[str, Any]) -> list[Issue]:
+def check_version_bump(
+    base_manifest: dict[str, Any],
+    current_manifest: dict[str, Any],
+    *,
+    allow_version_skip: bool = False,
+) -> list[Issue]:
     issues: list[Issue] = []
 
     base_metadata = metadata_version(base_manifest, "base marketplace")
     current_metadata = metadata_version(current_manifest, "current marketplace")
-    require_incremented(current_metadata, base_metadata, "metadata.version", issues)
+    require_incremented(
+        current_metadata,
+        base_metadata,
+        "metadata.version",
+        issues,
+        allow_version_skip=allow_version_skip,
+    )
 
     base_plugins = plugin_versions(base_manifest, "base marketplace")
     current_plugins = plugin_versions(current_manifest, "current marketplace")
@@ -244,7 +260,13 @@ def check_version_bump(base_manifest: dict[str, Any], current_manifest: dict[str
             label = f"plugins[{plugin_name!r}].version"
         else:
             label = f"plugins[{plugin_name!r} -> {current_plugin_name!r}].version"
-        require_incremented(current_version, base_version, label, issues)
+        require_incremented(
+            current_version,
+            base_version,
+            label,
+            issues,
+            allow_version_skip=allow_version_skip,
+        )
 
     return issues
 
@@ -274,6 +296,11 @@ def main() -> int:
         action="store_true",
         help="emit a GitHub Actions warning instead of failing when versions were not changed",
     )
+    parser.add_argument(
+        "--allow-version-skip",
+        action="store_true",
+        help="allow any forward semver increment for a controlled catch-up publication",
+    )
     args = parser.parse_args()
 
     marketplace_path = args.marketplace_path
@@ -286,7 +313,11 @@ def main() -> int:
     try:
         base_manifest = load_base_manifest(args.base_ref, marketplace_path)
         current_manifest = load_current_manifest(REPO_ROOT / marketplace_path)
-        issues = check_version_bump(base_manifest, current_manifest)
+        issues = check_version_bump(
+            base_manifest,
+            current_manifest,
+            allow_version_skip=args.allow_version_skip,
+        )
         versions_unchanged = manifest_versions_unchanged(base_manifest, current_manifest)
     except VersionBumpError as exc:
         print(exc, file=sys.stderr)

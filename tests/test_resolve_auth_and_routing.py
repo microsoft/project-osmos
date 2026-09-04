@@ -25,13 +25,25 @@ CAPACITY_ID = "55555555-5555-4555-8555-555555555555"
 
 
 def load_resolver():
-    spec = importlib.util.spec_from_file_location("project_osmos_auth_resolver", SCRIPT_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"could not load resolver from {SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    module_name = "project_osmos_auth_resolver"
+    original_runtime = sys.modules.get("python_runtime")
+    try:
+        with mock.patch.object(sys, "path", [str(SCRIPT_PATH.parent), *sys.path]):
+            spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"could not load resolver from {SCRIPT_PATH}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            return module
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    finally:
+        if original_runtime is None:
+            sys.modules.pop("python_runtime", None)
+        else:
+            sys.modules["python_runtime"] = original_runtime
 
 
 resolver = load_resolver()
