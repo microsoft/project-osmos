@@ -3,7 +3,8 @@
 """Validate a composed Project Osmos instruction against a character limit.
 
 Usage:
-    python3 check-instruction-length.py --path instruction.txt --limit 9500
+    python3 skills/project-osmos/scripts/check-instruction-length.py \
+        --path instruction.txt --limit 9500
 
 Prints JSON containing the measured character count and exits nonzero when the
 instruction exceeds the limit. The instruction content is never printed.
