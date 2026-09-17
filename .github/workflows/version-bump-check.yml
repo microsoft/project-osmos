@@ -32,7 +32,20 @@ jobs:
         id: version_bump
         env:
           BASE_REF: refs/remotes/origin/pr-base
-        run: python build/check_version_bump.py --base-ref "${BASE_REF}" --warning-only
+          CURRENT_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          args=(--base-ref "${BASE_REF}" --warning-only)
+          if [[ "${HEAD_REPOSITORY}" == "${CURRENT_REPOSITORY}" ]]; then
+            case "${BASE_BRANCH}:${HEAD_REF}" in
+              main:automation/publish-project-osmos-*|public:automation/sync-public-from-main-*)
+                args+=(--allow-version-skip)
+                ;;
+            esac
+          fi
+          python build/check_version_bump.py "${args[@]}"
 
       - name: Publish neutral version bump warning
         if: steps.version_bump.outputs.version_bumped == 'false'

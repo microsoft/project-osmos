@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -42,6 +44,55 @@ def load_post_user_message():
 
 
 post_user_message = load_post_user_message()
+
+
+class TokenFileSecurityTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX file modes are not enforced on Windows")
+    def test_group_readable_token_file_is_rejected_before_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "mwc-token"
+            token_file.write_text("secret", encoding="utf-8")
+            token_file.chmod(0o640)
+
+            with self.assertRaisesRegex(
+                PermissionError,
+                "--token-file must not be accessible by group or other users",
+            ):
+                post_user_message.read_private_token_file(token_file)
+
+    def test_private_token_file_is_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "mwc-token"
+            token_file.write_text("secret\n", encoding="utf-8")
+            token_file.chmod(0o600)
+
+            self.assertEqual("secret", post_user_message.read_private_token_file(token_file))
+
+    def test_permissions_are_checked_on_open_descriptor_before_any_read(self) -> None:
+        for mode in (0o640, 0o604, 0o620, 0o602, 0o610, 0o601):
+            with self.subTest(mode=oct(mode)):
+                path = mock.MagicMock()
+                handle = path.open.return_value.__enter__.return_value
+                with (
+                    mock.patch.object(post_user_message.os, "name", "posix"),
+                    mock.patch.object(post_user_message.os, "fstat", return_value=mock.Mock(st_mode=mode)) as fstat,
+                    self.assertRaises(PermissionError),
+                ):
+                    post_user_message.read_private_token_file(path)
+                fstat.assert_called_once_with(handle.fileno.return_value)
+                handle.read.assert_not_called()
+                path.stat.assert_not_called()
+
+    def test_windows_preserves_token_read_without_posix_mode_check(self) -> None:
+        path = mock.MagicMock()
+        handle = path.open.return_value.__enter__.return_value
+        handle.read.return_value = "secret\n"
+        with (
+            mock.patch.object(post_user_message.os, "name", "nt"),
+            mock.patch.object(post_user_message.os, "fstat") as fstat,
+        ):
+            self.assertEqual("secret", post_user_message.read_private_token_file(path))
+        fstat.assert_not_called()
 
 
 class DynamicLoaderIsolationTests(unittest.TestCase):

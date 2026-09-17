@@ -199,7 +199,7 @@ most one correction quoting that field. If the same intent appears again, rely
 on the poller's elicitation-loop signal in `state.json` and surface a handoff-contract
 failure instead of repeatedly posting answers or starting more runs.
 
-Before continuing, read `./.dataprojects/<task-id>/terminal.json` first when present, then `state.json`. Re-resolve the existing route and acquire a fresh token as needed; a token file or refresh command left by an exited poller may be stale. Then use the helper as one ordered operation:
+Before continuing, read `./.dataprojects/<task-id>/terminal.json` first when present, then `state.json`. Re-resolve the existing route and acquire a fresh token as needed; a token file or refresh command left by an exited poller may be stale. On non-Windows systems, restrict the token file to its owner (for example, `chmod 600 "$TOKEN_FILE"`); the continuation helper rejects any group/other permissions on the opened file before reading it. Windows retains its existing file-access behavior without a POSIX mode check. Then use the helper as one ordered operation:
 
 ```bash
 "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/post-user-message.py \
