@@ -2,8 +2,10 @@
 # Licensed under the MIT license.
 """Validate a composed Project Osmos instruction against a character limit.
 
-Usage:
-    python3 check-instruction-length.py --path instruction.txt --limit 9500
+Usage (Bash):
+    Select and initialize PYTHON_RUNNER as described in
+    skills/project-osmos/references/python-helper-runtime.md, then run:
+    "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/check-instruction-length.py --path instruction.txt --limit 9500
 
 Prints JSON containing the measured character count and exits nonzero when the
 instruction exceeds the limit. The instruction content is never printed.
