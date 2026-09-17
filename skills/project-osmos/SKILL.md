@@ -56,7 +56,7 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
    - For a generic agent choosing a different Lakehouse in a known workspace, ask only for the Lakehouse name and resolve it with Microsoft Fabric Skills.
    - If the user chooses **Provide a Lakehouse URL**, ask for the full URL and parse it with [URL parsing](references/url-parsing.md).
    - Never ask for workspace and Lakehouse IDs as separate startup fields.
-2. **Validate Lakehouse context.** Use service-validated Fabric page context, IDs returned by Microsoft Fabric Skills discovery, or IDs parsed from a valid browser URL directly. Ask for corrected input only when the selected method cannot resolve a workspace and Lakehouse.
+2. **Validate Lakehouse context.** Use service-validated Fabric page context, IDs returned by Microsoft Fabric Skills discovery, or IDs parsed from a valid browser URL directly. Validate supplied portal URLs against [URL parsing](references/url-parsing.md) before authentication or task creation (public URLs require supported HTTPS hosts). Ask for corrected input only when the selected method cannot resolve a workspace and Lakehouse or provides an invalid portal URL.
 3. **Resolve names and optional resource tenant.** Use the current Azure CLI session by default. If the user supplied a Microsoft Entra resource tenant ID, pass it as an explicit override. Ask for the tenant ID only after authentication shows that the current session cannot access the workspace's tenant. Then resolve `workspace_name`, `capacity_id` (from the API `capacityId` field), and `lakehouse_name` using [Authentication and route construction](references/auth-and-routing.md). Surface lookup failures; do not fall back to `(unknown)` or substitute GUIDs.
 4. **Collect the outcome.** Reuse a supplied outcome verbatim. Otherwise ask **What do you want to accomplish?** After context resolution, ask one optional "Anything else I should know?" prompt. Use `ask_user` with the first choice `"No, nothing else"` and freeform enabled so the user can either skip quickly or type extra context. Keep the user's complete outcome and guidance verbatim. Never start from an unsubmitted draft; acceptance in the intake step is the authorization to create and start the task.
 5. **Run intake and compile the handoff contract.** Follow
@@ -75,7 +75,7 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
    semantics, omit unselected options/rationales/`n/a` fields, and cap generated
    operational text at 2,500 characters. The service limit is 10,000
    characters; target 9,500 or fewer. Before `PUT`, run
-   `python3 skills/project-osmos/scripts/check-instruction-length.py --path
+   `"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/check-instruction-length.py --path
    <instruction-file> --limit 9500`. If the complete handoff does not fit,
    preserve it exactly using the
    [oversized instruction fallback](references/oversized-instructions.md);
@@ -84,9 +84,13 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
 
 
 7. **Create and run one task.** Use one generated task ID for any oversized-instruction upload, create, message, run, retries, and follow-ups. Follow [Task lifecycle](references/task-lifecycle.md) for endpoint shapes and response handling.
-8. **Seed the dashboard.** Create `./.dataprojects/<task-id>/`, copy `assets/dashboard.html`, and seed `state.js` / `state.json` exactly from [Status dashboard](references/dashboard.md). Use snake_case; never persist tokens, bearer headers, tenant credentials, or camelCase API keys.
-9. **Print the run card.** As soon as the run starts, print this table (real markdown table, not a code block):
-
+8. **Persist task and recovery context.**
+   - Create `./.dataprojects/<task-id>/` and seed `state.json` from [Task state and audit](references/task-state.md). Preserve the accepted intake contract, route identifiers, and confirmed artifacts for CLI resume.
+   - Use snake_case and never persist tokens, bearer headers, tenant credentials, or camelCase API keys.
+9. **Launch the task view and print the run card.**
+   - For every user, follow [Task page URL construction](references/url-parsing.md#task-page-url-construction) and run `scripts/launch-task-page.py` with the environment, workspace, Lakehouse, and task IDs. No enrollment signal is required. Pass the available Fabric page/Lakehouse URL as `--source-url`; if none is available, production uses the canonical Fabric portal and a private environment must supply its trusted portal base URL. Print `task_page_url` as `Task page`, surface it as a clickable Fabric link in chat, and save it in `state.json` before starting the poller. The helper's JSON contains prompt-free structured telemetry for task creation, launch result, URL fallback, workspace, task, and environment.
+   - A browser launch result of `failed` or `timed_out` is non-fatal (opening is bounded to three seconds). Print the helper's warning and canonical URL; the remote task continues and the recovery poller must still start. `--no-open` reports `not_attempted` without a failure warning. Never substitute a local HTML path for the Fabric link.
+   - If the helper cannot build a URL (exit 2), print the error and task ID, leave `task_page_url` unset, set the run card's `Task page` value to `Unavailable (URL validation failed)`, and start recovery anyway; never print an empty link or literal `<task_page_url>`. Correct the validated portal context and rerun the helper for the same task; never recreate it or guess a private portal host.
 
    | Field | Value |
    | --- | --- |
@@ -94,25 +98,25 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
    | Workspace | `<workspace_name> (<workspace_id-short>)` |
    | Spark session lakehouse | `<lakehouse_name> (<lakehouse_id-short>)` |
    | Operation | `<operation_id>` |
-   | Status | `<status> (<short_phase, e.g. "Spark session acquiring">)` |
-   | Dashboard | `<absolute-path-to-./.dataprojects/<task-id>/dashboard.html>` |
+   | Task page | `<task_page_url>` (clickable Fabric link) |
+   | Status | `<status> (<short_phase>)` |
 
-   Use the listed rows rather than inventing a reduced summary. Additional
-   output fields may follow, but they must not replace Workspace, Spark session
-   lakehouse, Operation, Task page when available, Status, or Dashboard.
-
-10. **Spawn the poller.** Do not poll inside the LLM conversation. Spawn `scripts/dashboard-poller.py` as a detached daemon using [Spawning the dashboard poller daemon](references/dashboard-poller.md), confirm `poller.pid`, tail one log line, then hand off.
+   Use all listed rows rather than inventing a reduced summary.
+10. **Start headless monitoring and recovery.**
+   - For every task, spawn `scripts/dashboard-poller.py` using [Spawning the recovery poller](references/dashboard-poller.md), confirm `poller.pid`, tail one log line, then hand off. Do not poll inside the LLM conversation.
+   - The retained script name is legacy; it runs without a local UI. Token refresh, automatic recovery, audit capture, and clarification-loop detection do not depend on either browser page being open. Local recovery requires the process and machine to remain running and authenticated; stopping it does not cancel the remote task.
+   - Use Fabric for visual progress. Continue this skill's conversation and control operations through the CLI task APIs, not browser automation.
 11. **Mediate follow-ups.** Continue the existing task; never create a replacement.
    - Read `./.dataprojects/<task-id>/terminal.json` first when present, then `state.json`, so the prior poller outcome and task route are understood before any write.
-   - Re-resolve the existing task route and acquire fresh authentication as needed using [Authentication and route construction](references/auth-and-routing.md). Fetch live task status before deciding whether a run is active; local dashboard state is context, not authority.
+   - Re-resolve the existing task route and acquire fresh authentication as needed using [Authentication and route construction](references/auth-and-routing.md). Fetch live task status before deciding whether a run is active; local state is context, not authority.
    - Post the full user-authored message first with `scripts/post-user-message.py --output json`. The helper preserves flat author metadata, normalizes string, numeric, and stringified-numeric statuses, and also considers `runDetails.completedAt` and `runDetails.errorMessage`. Do not invent a raw message POST, truncate the user's text, or post Copilot/UI chatter.
    - Elicitation responses commonly arrive after the run that asked the question has become terminal; treat that as the normal continuation path. After the message succeeds, the helper always fetches live status again so the decision reflects the state after the user's answer was accepted.
    - If that post-message status is `Running` with no completion or error evidence, the helper does not call `/run`. Otherwise it calls `POST /{taskId}/run` exactly once on the same task ID. If that request returns HTTP 409, it performs one live status read and accepts the conflict only when a run is now active; it never sends a second run request.
-   - When the JSON result has `poller_restart_required: true`, respawn `dashboard-poller.py` with fresh auth against the existing state directory and verify startup as described in [Spawning the dashboard poller daemon](references/dashboard-poller.md). The poller archives the prior terminal marker.
+   - When the JSON result has `poller_restart_required: true`, ensure a poller is running with fresh auth against the existing state directory as described in [Spawning the recovery poller](references/dashboard-poller.md). Reuse a healthy existing process; do not launch duplicate recovery workers. A newly started poller archives the prior terminal marker.
    - Surface status lookup, message-post, run-start, authentication, and poller-start failures explicitly. Do not report a successful continuation unless every required step completed.
 
 
-12. **Report from state.** On status questions or final summaries, read `terminal.json` first when present, then `state.json`. Quote `reason`, `last_error_message`, retry counts, token-refresh counts, and identifiers from state instead of guessing.
+12. **Report authoritative status.** Read `terminal.json` first when present, then `state.json` for local recovery context. Fetch live task status and messages when reporting current service state; distinguish a stopped poller from a stopped task. Quote returned status/error fields and identifiers instead of guessing, and include the Fabric task link when the user needs to view progress.
 
 ## Non-negotiables
 
@@ -133,10 +137,10 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
 - Before canceling or deleting a task, follow the confirmation gates in [Task lifecycle](references/task-lifecycle.md). Delete is unrecoverable and requires exact task ID re-entry; cancel only stops the current run and requires yes/no confirmation.
 - The Lakehouse ID is only the Spark session's default lakehouse. It is not automatically a source, destination, or scope boundary. Label it "Default lakehouse for the Spark session".
 - Poll messages for progress; task status alone is not enough.
-- Let the poller own message de-duplication, `tool` / `system` filtering, token refresh, terminal markers, and the documented Spark statement transient retry. Do not manually `POST /run` for that transient while the poller is alive.
-- Pass `--token-refresh-cmd` to the poller to prevent expiring auth. The refresh command must print the raw token only.
+- Let the headless poller own message de-duplication, `tool` / `system` filtering, token refresh, terminal markers, and the documented Spark statement transient retry. Do not manually `POST /run` for that transient while the poller is alive.
+- Pass `--token-refresh-cmd` to every local poller to prevent expiring auth. The refresh command must print the raw token only.
 
-- If polling stalls, resume the existing task and dashboard directory. Do not re-run intake, create a new task, or overwrite the dashboard.
+- If local polling stalls, resume the existing task and state directory through the CLI route. Never re-run intake or create a new task.
 - A user-authored follow-up is the continuation request for that same task. Follow the ordered status → message → optional run → poller sequence above.
 - If workspace-folder artifact publishing fails, fail loudly; do not silently fall back to Lakehouse Files.
 - Report row counts and mutation counts as the literal `count()` / SQL output captured in the messages stream.
@@ -148,8 +152,8 @@ This file is the lean runtime contract. Put detailed mechanics in the reference 
 - [Operational intake questionnaire](references/intake-questionnaire.md) — task types, recommendations card, Questions 1-8, skip logic, rendered handoff
 - [Authentication and route construction](references/auth-and-routing.md) — authentication flow and task base URL
 - [Task lifecycle](references/task-lifecycle.md) — task/message/run endpoints, statuses, response shapes
-- [Status dashboard](references/dashboard.md) — `./.dataprojects/<task-id>/` layout and `window.__STATE` schema
-- [Spawning the dashboard poller daemon](references/dashboard-poller.md) — detached poller, token refresh, retry, resume, cleanup
+- [Task state and audit](references/task-state.md) — durable intake, messages, artifacts, and recovery context
+- [Spawning the recovery poller](references/dashboard-poller.md) — headless poller, token refresh, retry, resume, cleanup
 - [Environment routing](references/environment-routing.md) — Fabric environment and API host selection
 - [Python helper runtime](references/python-helper-runtime.md) — reuse existing `uv`, virtual, Conda, or system Python without installing packages
 - [Troubleshooting](references/troubleshooting.md) — retryable Spark transient and auth/poller recovery

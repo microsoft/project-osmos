@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -71,6 +77,66 @@ class PythonHelperRuntimeContractTests(unittest.TestCase):
         self.assertIn("require Python 3.11 or newer", message)
         self.assertIn("/usr/bin/python3 is Python 3.10.14", message)
         self.assertIn("No packages or environments were changed", message)
+
+    def test_live_examples_reuse_selected_runner(self) -> None:
+        documents = [SKILL_PATH, *sorted((SKILL_DIR / "references").glob("*.md"))]
+        for path in documents:
+            with self.subTest(path=path.name):
+                self.assertNotRegex(
+                    path.read_text(encoding="utf-8"),
+                    r"\bpython3?\s+skills/project-osmos/scripts/",
+                )
+        for reference, helper in (
+            ("url-parsing.md", "launch-task-page.py"),
+            ("dashboard-poller.md", "dashboard-poller.py"),
+            ("dashboard-poller.md", "resolve-auth-and-routing.py"),
+        ):
+            content = (SKILL_DIR / "references" / reference).read_text(encoding="utf-8")
+            self.assertIn(
+                f'"${{PYTHON_RUNNER[@]}}" skills/project-osmos/scripts/{helper}',
+                content,
+            )
+
+    def test_script_usage_examples_reuse_selected_runner(self) -> None:
+        for name in ("dashboard-poller.py", "post-user-message.py", "resolve-auth-and-routing.py"):
+            with self.subTest(script=name):
+                tree = ast.parse((SCRIPTS_DIR / name).read_text(encoding="utf-8"))
+                docstring = ast.get_docstring(tree)
+                self.assertIsNotNone(docstring)
+                self.assertIn(f'"${{PYTHON_RUNNER[@]}}" skills/project-osmos/scripts/{name}', docstring)
+                self.assertNotIn("python3", docstring)
+                if name == "dashboard-poller.py":
+                    self.assertIn('--token-refresh-cmd   "$REFRESH_CMD"', docstring)
+
+    @unittest.skipUnless(os.name != "nt" and shutil.which("bash"), "Bash example")
+    def test_refresh_recipe_preserves_selected_runner_and_spaced_paths(self) -> None:
+        reference = (SKILL_DIR / "references" / "dashboard-poller.md").read_text(encoding="utf-8")
+        recipe = "REFRESH_CMD=" + reference.split("REFRESH_CMD=", 1)[1].split("\n```", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "selected python"
+            interpreter.symlink_to(sys.executable)
+            refresh_script = Path(directory) / "refresh script.py"
+            refresh_script.write_text(
+                "import json, sys\nprint(json.dumps([sys.executable, sys.flags.utf8_mode]))\n",
+                encoding="utf-8",
+            )
+            runner = [str(interpreter), "-X", "utf8"]
+            script = (
+                f"PYTHON_RUNNER=({shlex.join(runner)})\n"
+                f"REFRESH_SCRIPT={shlex.quote(str(refresh_script))}\n"
+                f"{recipe}\n"
+                'printf "%s\\n" "$REFRESH_CMD"\n'
+                'sh -c "$REFRESH_CMD"\n'
+            )
+            completed = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True, text=True, timeout=10, check=True,
+            )
+            command, result = completed.stdout.splitlines()
+            self.assertEqual(shlex.split(command), [*runner, str(refresh_script)])
+            executable, utf8_mode = json.loads(result)
+            self.assertEqual(Path(executable).resolve(), interpreter.resolve())
+            self.assertEqual(utf8_mode, 1)
 
     def test_every_python_helper_enforces_the_shared_minimum(self) -> None:
         for path in SCRIPTS_DIR.glob("*.py"):

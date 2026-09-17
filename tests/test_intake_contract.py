@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.test_launch_task_page import launch_task_page
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = REPO_ROOT / "skills" / "project-osmos"
 INTAKE_PATH = SKILL_DIR / "references" / "intake-questionnaire.md"
 SKILL_PATH = SKILL_DIR / "SKILL.md"
-DASHBOARD_REFERENCE_PATH = SKILL_DIR / "references" / "dashboard.md"
+TASK_STATE_REFERENCE_PATH = SKILL_DIR / "references" / "task-state.md"
 URL_PARSING_PATH = SKILL_DIR / "references" / "url-parsing.md"
 POLLER_PATH = SKILL_DIR / "scripts" / "dashboard-poller.py"
 LENGTH_CHECKER_PATH = SKILL_DIR / "scripts" / "check-instruction-length.py"
@@ -77,18 +81,88 @@ instruction_length = load_instruction_length_checker()
 
 
 class IntakeContractTests(unittest.TestCase):
+    def test_public_intake_parser_matches_launcher_portal_policy(self) -> None:
+        public_reference = self.url_parsing
+        stripper = REPO_ROOT / ".github" / "public" / "strip-internal-blocks.py"
+        if stripper.exists():
+            spec = importlib.util.spec_from_file_location("public_block_stripper", stripper)
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            public_reference = module.BLOCK_RE.sub("", public_reference)
+        self.assertNotRegex(public_reference.lower(), r"<[/]?internal>")
+        public_reference = public_reference.split("## Task page URL construction", 1)[0]
+        blocks = re.findall(r"```python\n(.*?)```", public_reference, re.DOTALL)
+        namespace: dict[str, object] = {}
+        exec("\n".join(blocks), namespace)
+        parse = namespace["parse_fabric_url"]
+        self.assertEqual(namespace["SUPPORTED_HOSTS"], launch_task_page.PRODUCTION_HOSTS)
+        path = (
+            "/groups/11111111-1111-1111-1111-111111111111"
+            "/lakehouses/22222222-2222-2222-2222-222222222222"
+        )
+        for origin in (
+            "http://app.fabric.microsoft.com",
+            "ftp://app.fabric.microsoft.com",
+            "https://app.fabric.microsoft.com:444",
+            "https://user@app.fabric.microsoft.com",
+            "https://app.fabric.microsoft.com:invalid",
+            "https://portal.example.test",
+            "https://app.fabric.microsoft.com\n",
+            "https://app.fabric.microsoft.com\\",
+        ):
+            with self.subTest(origin=origin):
+                self.assertIsNone(parse(origin + path))
+                with self.assertRaises(ValueError):
+                    launch_task_page.portal_parts("prod", origin + path, None)
+        for origin in (
+            *(f"https://{host}" for host in launch_task_page.PRODUCTION_HOSTS),
+            "https://app.powerbi.com:443",
+            "app.fabric.microsoft.com",
+        ):
+            with self.subTest(origin=origin):
+                self.assertEqual(
+                    parse(origin + path)["lakehouse_id"],
+                    "22222222-2222-2222-2222-222222222222",
+                )
+                self.assertEqual(
+                    launch_task_page.portal_parts("prod", origin + path, None)[0],
+                    "https",
+                )
+        for whitespace in (" ", "\n", "\r\n", "\t"):
+            with self.subTest(whitespace=whitespace):
+                self.assertIsNotNone(parse(
+                    whitespace + "https://app.fabric.microsoft.com" + path + whitespace,
+                ))
+        query = "context=https://example.test/path&keep=a%2fb+%20c"
+        for host in launch_task_page.PRODUCTION_HOSTS:
+            with self.subTest(host=host, query=query):
+                url = f"{host}{path}?{query}"
+                self.assertEqual(
+                    parse(url)["lakehouse_id"],
+                    "22222222-2222-2222-2222-222222222222",
+                )
+                self.assertEqual(
+                    launch_task_page.portal_parts("prod", url, None),
+                    ("https", host, query),
+                )
+
+    def test_task_page_error_run_card_has_explicit_unavailable_value(self) -> None:
+        self.assertIn(
+            "set the run card's `Task page` value to `Unavailable (URL validation failed)`",
+            self.skill,
+        )
+        self.assertIn("never print an empty link or literal `<task_page_url>`", self.skill)
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.intake = INTAKE_PATH.read_text(encoding="utf-8")
         cls.skill = SKILL_PATH.read_text(encoding="utf-8")
-        cls.dashboard = DASHBOARD_REFERENCE_PATH.read_text(encoding="utf-8")
+        cls.task_state = TASK_STATE_REFERENCE_PATH.read_text(encoding="utf-8")
         cls.url_parsing = URL_PARSING_PATH.read_text(encoding="utf-8")
         cls.oversized_reference = OVERSIZED_REFERENCE_PATH.read_text(encoding="utf-8")
         cls.task_lifecycle = TASK_LIFECYCLE_PATH.read_text(encoding="utf-8")
-
-    def require_internal_source(self) -> None:
-        if not (REPO_ROOT / ".github" / "public").is_dir():
-            self.skipTest("internal task-page guidance is not part of the public package")
 
     def test_explicit_requirements_precede_task_type_fallbacks(self) -> None:
         self.assertIn("Derive requirements before applying defaults", self.intake)
@@ -140,7 +214,7 @@ class IntakeContractTests(unittest.TestCase):
             "`## Execution plan` immediately below it",
             normalized_skill,
         )
-        command = "python3 skills/project-osmos/scripts/check-instruction-length.py"
+        command = '"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/check-instruction-length.py'
         self.assertIn(command, self.skill)
         self.assertIn(
             command,
@@ -225,23 +299,52 @@ class IntakeContractTests(unittest.TestCase):
         self.assertIn("The recommendation card is the review-and-consent surface", self.intake)
         self.assertIn("acceptance in the intake step is the authorization", self.skill)
 
-    def test_run_card_never_swallows_available_fabric_task_url(self) -> None:
-        self.require_internal_source()
-        self.assertIn("the run card\n   **must** include `| Task page | <task_page_url> |`", self.skill)
-        self.assertIn("Do not omit it", self.skill)
-        self.assertIn("the same URL must be surfaced in chat", self.skill)
-        self.assertIn("they must not replace Workspace", self.skill)
+    def test_every_user_gets_fabric_task_page(self) -> None:
+        self.assertIn("For every user", self.skill)
+        self.assertIn("No enrollment signal is required", self.skill)
+        self.assertIn("Print `task_page_url` as `Task page`", self.skill)
+        self.assertIn("| Task page | `<task_page_url>` (clickable Fabric link) |", self.skill)
+        self.assertNotIn("--private-preview-scope", self.skill)
 
-    def test_available_fabric_task_url_opens_automatically(self) -> None:
-        self.require_internal_source()
-        self.assertIn("Immediately open `task_page_url`", self.skill)
-        self.assertIn("it is the primary browser target", self.skill)
-        self.assertIn("open it in the\nuser's default browser", self.url_parsing)
-        self.assertIn("open `dashboard.html` as the fallback", self.dashboard)
+    def test_local_display_removed_but_headless_poller_retained(self) -> None:
+        self.assertFalse((SKILL_DIR / "assets" / "dashboard.html").exists())
+        self.assertFalse((SKILL_DIR / "references" / "dashboard.md").exists())
+        self.assertNotIn("references/dashboard.md", self.skill)
+        self.assertNotIn("| Dashboard |", self.skill)
+        self.assertNotIn("`state.js`", self.skill)
+        self.assertIn("For every task, spawn `scripts/dashboard-poller.py`", self.skill)
+        self.assertIn("do not depend on either browser page being open", self.skill)
+        for path in SKILL_DIR.rglob("*"):
+            if path.is_file() and path.suffix in {".md", ".py", ".html", ".js"}:
+                with self.subTest(path=path.relative_to(SKILL_DIR)):
+                    text = path.read_text(encoding="utf-8")
+                    for removed in ("state.js", "dashboard.html", "references/dashboard.md"):
+                        self.assertNotRegex(text, re.escape(removed) + r"(?![a-zA-Z0-9])")
 
-    def test_dashboard_keeps_contract_provenance_and_loop_state(self) -> None:
+    def test_follow_up_keeps_recovery_without_duplicate_workers(self) -> None:
+        self.assertIn("poller_restart_required: true", self.skill)
+        self.assertIn("Reuse a healthy existing process", self.skill)
+        self.assertIn("do not launch duplicate recovery workers", self.skill)
+
+    def test_browser_failure_keeps_link_and_recovery(self) -> None:
+        self.assertIn("launch is non-fatal", self.url_parsing)
+        self.assertIn("Browser opening is bounded to three seconds", self.url_parsing)
+        self.assertIn("continue starting the headless recovery poller", self.url_parsing)
+        self.assertIn("Never substitute a local HTML path for the Fabric link", self.skill)
+
+    def test_url_validation_failure_does_not_gate_recovery(self) -> None:
+        self.assertIn("URL validation fails (exit 2)", self.url_parsing)
+        self.assertIn("start the recovery poller anyway", self.url_parsing)
+        self.assertIn("start recovery anyway", self.skill)
+        self.assertIn("rerun the helper for the same task", self.skill)
+        poller_reference = (SKILL_DIR / "references" / "dashboard-poller.md").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("browser launch or URL validation failed", poller_reference)
+
+    def test_task_state_keeps_contract_provenance_and_loop_state(self) -> None:
         for text in (
-            "contract_version: 2",
+            "| `contract_version` | `2` |",
             "contract_sha256",
             "selection_source",
             "executable_meaning",
@@ -249,7 +352,95 @@ class IntakeContractTests(unittest.TestCase):
             "elicitation_loop_count",
         ):
             with self.subTest(text=text):
-                self.assertIn(text, self.dashboard)
+                self.assertIn(text, self.task_state)
+
+
+class HeadlessRecoveryTests(unittest.TestCase):
+    def test_state_and_terminal_preserve_context_without_ui_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            state = {
+                "task": {"id": "task-1", "task_page_url": "https://app.fabric.microsoft.com/"},
+                "intake": {"contract_version": 2, "contract_sha256": "accepted-spec"},
+                "spec": "## Execution plan",
+                "messages": [{"id": "a1", "role": "assistant", "text": "Done"}],
+                "artifacts": {"notebook": None, "table": None},
+            }
+            terminal = {"status": "Completed", "reason": "terminal_status"}
+            dashboard_poller.write_terminal_state(state_dir, state, terminal)
+            restored = dashboard_poller.load_state(state_dir / "state.json")
+            self.assertEqual(restored["intake"], state["intake"])
+            self.assertEqual(restored["spec"], state["spec"])
+            self.assertEqual(restored["task"], state["task"])
+            self.assertEqual(restored["messages"], state["messages"])
+            self.assertEqual(restored["artifacts"], state["artifacts"])
+            self.assertEqual(restored["terminal"]["reason"], "terminal_status")
+            self.assertEqual(
+                {path.name for path in state_dir.iterdir()}, {"state.json", "terminal.json"},
+            )
+
+    def test_daemon_retries_same_task_without_a_browser_or_html(self) -> None:
+        error = "Run failed while executing statements on the Spark session. Please retry."
+        base_url = "https://example.invalid/tasks"
+        task_id = "task-1"
+        messages = {"messages": [
+            {"id": "a1", "role": "Assistant", "content": "Checking data"},
+            {"id": "t1", "role": "Tool", "content": "Tool detail"},
+        ]}
+        failed = {"status": "Failed", "runDetails": {
+            "operationId": "operation-1", "completedAt": "2026-09-09T12:00:00Z",
+            "errorMessage": error,
+        }}
+        completed = {"status": "Completed", "runDetails": {
+            "operationId": "operation-2", "completedAt": "2026-09-09T12:01:00Z",
+        }}
+
+        def response(payload):
+            return dashboard_poller.HttpResult(200, json.dumps(payload).encode())
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            state = {
+                "task": {"id": task_id},
+                "intake": {"contract_version": 2, "contract_sha256": "accepted-spec"},
+                "spec": "## Execution plan",
+                "messages": [],
+            }
+            dashboard_poller.write_state(state_dir, state)
+            with (
+                mock.patch.object(sys, "argv", [
+                    str(POLLER_PATH), "--base-url", base_url, "--task-id", task_id,
+                    "--state-dir", directory, "--max-runtime", "5",
+                ]),
+                mock.patch.object(dashboard_poller, "_resolve_initial_token", return_value="test-token"),
+                mock.patch.object(dashboard_poller, "_install_signal_handlers"),
+                mock.patch.object(dashboard_poller, "sleep_interruptibly"),
+                mock.patch.object(dashboard_poller, "log"),
+                mock.patch.object(dashboard_poller, "http_request", side_effect=[
+                    response(messages), response(failed),
+                    dashboard_poller.HttpResult(202, b""),
+                    response(messages), response(completed),
+                ]) as request,
+                mock.patch("webbrowser.open", side_effect=AssertionError("browser must not be used")),
+            ):
+                self.assertEqual(dashboard_poller.main(), 0)
+
+            posts = [call for call in request.call_args_list if call.kwargs.get("method") == "POST"]
+            self.assertEqual(len(posts), 1)
+            self.assertEqual(posts[0].args[0], f"{base_url}/{task_id}/run")
+            restored = dashboard_poller.load_state(state_dir / "state.json")
+            self.assertEqual(restored["terminal"]["status"], "Completed")
+            self.assertEqual(restored["terminal"]["auto_retries_total"], 1)
+            self.assertEqual(restored["intake"], state["intake"])
+            self.assertEqual(restored["spec"], state["spec"])
+            self.assertEqual(len(restored["messages"]), 1)
+            audit = [json.loads(line) for line in (state_dir / "messages.ndjson").read_text().splitlines()]
+            self.assertEqual([message["id"] for message in audit], ["a1", "t1"])
+            self.assertFalse((state_dir / "poller.pid").exists())
+            self.assertEqual(
+                {path.name for path in state_dir.iterdir()},
+                {"state.json", "terminal.json", "messages.ndjson"},
+            )
 
 
 class InstructionLengthTests(unittest.TestCase):

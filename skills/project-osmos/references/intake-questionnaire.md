@@ -430,7 +430,7 @@ block is subordinate to that character budget:
    the smaller remaining amount needed to keep the final instruction at or
    below 9,500 characters.
 4. Before `PUT /{taskId}`, write the final instruction to a temporary file and
-   run `python3 skills/project-osmos/scripts/check-instruction-length.py
+   run `"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/check-instruction-length.py
    --path <file> --limit 9500`.
 5. If it does not fit, remove generated verbosity—not user text. If the
    complete handoff still exceeds 9,500 characters, use the
@@ -448,7 +448,7 @@ The remote handoff is **not** a copy of the questionnaire. Include only:
 
 Do not include unselected options, card `Why:` text, general risk education,
 question subtitles, repeated warnings, or `n/a` fields. Those remain in
-`intake.answers` and the dashboard audit state. Define shared rules once rather
+`intake.answers` and the local task audit state. Define shared rules once rather
 than repeating them for every resource.
 
 Use this compact shape:

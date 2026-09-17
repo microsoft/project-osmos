@@ -1,10 +1,20 @@
-# Spawning the dashboard poller daemon
+# Spawning the headless recovery poller
 
 The skill spawns [`scripts/dashboard-poller.py`](../scripts/dashboard-poller.py) as a detached background process so the LLM agent does not remain in a polling loop. See [SKILL.md → Operating contract](../SKILL.md).
 
+The script name is retained for compatibility. It does not serve or open a UI.
+Automatic recovery, token refresh, audit capture, and clarification-loop
+detection work with the browser closed. They require the local process and
+machine to remain running with working authentication. Closing the Fabric page
+does not stop recovery; stopping the poller does not cancel the remote task.
+
 ## Spawn pattern
 
-After the task is `Running` and the CLI summary table has been printed (the dashboard + poller steps in `SKILL.md`), follow these sub-steps.
+After the task is `Running`, [task state](task-state.md) has been seeded, and
+the run card has been printed (with the Fabric link when available), follow
+these sub-steps even if browser launch or URL validation failed. A missing link
+must not gate recovery. Before spawning on resume, check the recorded PID and
+reuse a healthy existing poller; never start two recovery workers for one task.
 
 ### Required environment variables
 
@@ -23,12 +33,14 @@ Set these from [`auth-and-routing.md`](auth-and-routing.md):
 | `TASKS_BASE` | SparkCore task base URL |
 | `TASK_ID` | Project Osmos task ID |
 
-Guard them first and export the values needed by the refresh recipe:
+Use the same `PYTHON_RUNNER` array selected by
+[Python helper runtime](python-helper-runtime.md) for the entire run.
+Guard the environment variables first and export the refresh recipe's values:
 
 ```bash
 : "${MWC_TOKEN:?set MWC_TOKEN before spawning the poller}"
 RESOURCE_TENANT_ID="$(
-  python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \
+  "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/resolve-auth-and-routing.py \
     --normalize-resource-tenant-env
 )" || exit 1
 : "${GENERATEMWC_URL:?set GENERATEMWC_URL before composing REFRESH_CMD}"
@@ -42,7 +54,7 @@ export RESOURCE_TENANT_ID GENERATEMWC_URL CAPACITY_ID WORKSPACE_ID LAKEHOUSE_ID
 
 ### Step 1 — stash the initial MWC token
 
-Write the initial MWC token to a 0600 file the daemon can read, then remove token-bearing variables before spawning. Tokens never go into `argv` or dashboard state.
+Write the initial MWC token to a 0600 file the daemon can read, then remove token-bearing variables before spawning. Tokens never go into `argv` or task state.
 
 ```bash
 TOKEN_FILE="$(mktemp)"; chmod 600 "$TOKEN_FILE"
@@ -110,7 +122,9 @@ if not token:
     sys.exit("no token in generatemwctoken response")
 sys.stdout.write(token)
 PY
-REFRESH_CMD="python3 $REFRESH_SCRIPT"
+REFRESH_CMD="$("${PYTHON_RUNNER[@]}" -c \
+  'import shlex, sys; print(shlex.join(sys.argv[1:]))' \
+  "${PYTHON_RUNNER[@]}" "$REFRESH_SCRIPT")" || exit 1
 ```
 
 ### Step 3 — spawn the poller, fully detached
@@ -118,7 +132,7 @@ REFRESH_CMD="python3 $REFRESH_SCRIPT"
 The bash tool **must** use `mode="async"` with `detach: true` for this step. A sync session kills the process group on exit and `nohup` alone does not prevent that.
 
 ```bash
-nohup env -u MWC_TOKEN -u PBI_TOKEN -u BEARER python3 skills/project-osmos/scripts/dashboard-poller.py \
+nohup env -u MWC_TOKEN -u PBI_TOKEN -u BEARER "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/dashboard-poller.py \
     --base-url                       "$TASKS_BASE" \
     --task-id                        "$TASK_ID" \
     --state-dir                      ".dataprojects/$TASK_ID" \
@@ -171,7 +185,7 @@ tail -1 ".dataprojects/$TASK_ID/poller.log"
 - **Documented Spark statement transient** — normalized phrase match on `runDetails.errorMessage`, error-signature dedup (sha256 of `operationId|completedAt|err`), `POST /{taskId}/run` on the same task ID with backoff `30/60/120` flat, hard cap `--max-auto-retries=10`, time-based give-up `--no-progress-window-seconds=7200`. If `operationId` is absent, the signature degrades to `sha256("|completedAt|err")` — still functional, just lower-entropy.
 
 
-- **Exit reason capture** — single-write `terminal.json` covering every exit path (terminal status, `max_runtime`, `max_auto_retries`, `no_progress_window`, `retry_signature_repeat`, `no_token_at_startup`, `run_post_failed_<HTTP>`, `crash`, `signal`). Mirrored into `state.terminal` so the dashboard can render it (`file://` cannot fetch a sibling JSON).
+- **Exit reason capture** — single-write `terminal.json` covering every exit path (terminal status, `max_runtime`, `max_auto_retries`, `no_progress_window`, `retry_signature_repeat`, `no_token_at_startup`, `run_post_failed_<HTTP>`, `crash`, `signal`). Mirrored into `state.terminal` for CLI diagnostics and resume.
 
 See [troubleshooting.md](troubleshooting.md) for recovery semantics.
 
@@ -179,8 +193,7 @@ See [troubleshooting.md](troubleshooting.md) for recovery semantics.
 
 In `./.dataprojects/<task-id>/`:
 
-- `state.js` — `window.__STATE = { ... }` consumed by `dashboard.html`. Includes `recovery` block and (on exit) `terminal` mirror.
-- `state.json` — same content as JSON; the source of truth for resume.
+- `state.json` — durable task/accepted-intake snapshot, including `recovery` and (on exit) `terminal`. Used for local resume context; live service state remains authoritative.
 - `messages.ndjson` — append-only audit log (every message including `tool` and `system`).
 - `poller.log` — stdout/stderr from the poller for debugging.
 - `poller.pid` — current PID; deleted on clean exit.

@@ -23,7 +23,7 @@ Public hosts:
 
 1. Use the current Azure CLI session. If no session is available, run `az login --allow-no-subscriptions`. For a supplied resource-tenant override, run `az login --tenant <resource-tenant-id> --allow-no-subscriptions`.
 2. Get a Power BI bearer token with `az account get-access-token --resource https://analysis.windows.net/powerbi/api`. Add `--tenant <resource-tenant-id>` only when an override was supplied.
-3. Call the workspace metadata endpoint and capture the API `capacityId` field. Use it as the route/token capacity ID, and persist it in dashboard state as `capacity_id`.
+3. Call the workspace metadata endpoint and capture the API `capacityId` field. Use it as the route/token capacity ID, and persist it in task state as `capacity_id`.
 4. Call the public Fabric `generatemwctoken` endpoint with:
    - `capacityObjectId`
    - `workloadType` set to `SparkCore`
@@ -35,10 +35,10 @@ Do not guess or substitute another token-exchange host. Use the tested helper sc
 
 ### Tested auth helper scripts
 
-The helpers write `routing.json`, a private `mwc-token` file, `env.sh` for Bash, and `env.ps1` for PowerShell. Use the generated environment file for the unchanged task lifecycle and dashboard poller flow.
+The helpers write `routing.json`, a private `mwc-token` file, `env.sh` for Bash, and `env.ps1` for PowerShell. Use the generated environment file for the task lifecycle and headless recovery poller flow.
 
 ```bash
-python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \
+"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/resolve-auth-and-routing.py \
   --workspace-id <workspace-id> \
   --lakehouse-id <lakehouse-id> \
   --fabric-api-host <selected-fabric-api-host> \

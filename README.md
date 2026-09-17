@@ -10,7 +10,7 @@ Project Osmos is an AI-powered data engineering workflow for Fabric. Describe th
 - Create and test Fabric notebooks.
 - Clean, join, aggregate, and validate data.
 - Create or update Delta tables and workspace artifacts.
-- Run longer workflows while you monitor progress from a local dashboard.
+- Run longer workflows while you monitor progress from Fabric task details.
 
 The plugin on your machine starts and monitors the task. Agent reasoning, Spark execution, and OneLake data access run inside Microsoft Fabric.
 
@@ -119,13 +119,25 @@ and build and test a notebook that ingests the CSV into the table.
 
 ### 5. Monitor the run
 
-Project Osmos runs in Fabric and complex tasks can take up to a day. After the task starts, the plugin displays the task ID and creates a local dashboard under:
+Project Osmos runs in Fabric and complex tasks can take up to a day. After each
+task starts, the plugin prints and opens its Fabric task details link.
+Continue sending follow-ups and control requests through your coding client.
+If the browser cannot open automatically, use the printed Fabric URL; the
+remote task and local recovery setup continue.
+
+A headless local poller handles token refresh, bounded automatic recovery,
+clarification-loop detection, and audit capture. It does not need any browser
+page open. Task state and audit records remain under:
 
 ```text
 ./.dataprojects/<task-id>/
 ```
 
-You can close the terminal or shut down your machine without stopping the Fabric task. When you return, reopen your client and ask it to resume the existing Project Osmos task. Include the task ID if the client cannot identify the previous run.
+Closing the browser does not stop the poller. Shutting down your machine or
+stopping the poller stops local monitoring and automatic recovery, but does not
+cancel the Fabric task. When you return, reopen your client and ask it to resume
+the existing Project Osmos task. Include the task ID if the client cannot
+identify the previous run.
 
 ## Update the plugin
 
@@ -162,7 +174,7 @@ Restart the client after an update so the new skill content is loaded.
 | Workspace or capacity lookup fails | Confirm the Lakehouse URL is correct, the workspace has Fabric capacity, and your Azure identity can access it. |
 | Lakehouse lookup or task creation fails | Confirm the workspace and Lakehouse names, choose the intended match if discovery is ambiguous, or provide the complete Lakehouse browser URL. |
 | The task runs for a long time | Spark startup, planning, and complex transformations can take time. Continue monitoring the existing task rather than creating another one. |
-| The local dashboard or poller stopped | Resume the existing task with the same task ID. Do not restart intake or create a duplicate task. |
+| The local recovery poller stopped | Resume the existing task with the same task ID. Do not restart intake or create a duplicate task. |
 | The installed plugin appears outdated | Run the manual update command for your client, restart it, and retry. |
 
 ## Repository contents

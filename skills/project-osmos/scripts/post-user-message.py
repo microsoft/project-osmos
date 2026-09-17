@@ -4,8 +4,8 @@
 
 The skill operates as a mediator between the human and the SparkCore orchestrator:
 every user message intended for the run is POSTed to the orchestrator with
-flat `metadata.author_name` / `metadata.author_source` values so the dashboard
-can attribute it without sending the nested metadata shape currently rejected
+flat `metadata.author_name` / `metadata.author_source` values to preserve
+attribution without sending the nested metadata shape currently rejected
 by deployed SparkCore-direct routes.
 
 Before posting, the helper fetches live task state for context. It posts the
@@ -14,8 +14,8 @@ the same task only when the post-message state is not running. An elicitation
 response therefore cannot be stranded when the run becomes terminal while the
 user is answering, and a message-post failure cannot start a run.
 
-Usage:
-    python3 skills/project-osmos/scripts/post-user-message.py \\
+Usage (Bash; select PYTHON_RUNNER using references/python-helper-runtime.md):
+    "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/post-user-message.py \\
         --base-url   https://.../aichat \\
         --task-id    <uuid> \\
         --token-file <path> \\
@@ -36,9 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
-import stat
 import subprocess
 import sys
 import urllib.error
@@ -266,13 +264,6 @@ def detect_az_user() -> str | None:
         return None
 
 
-def read_private_token_file(path: Path) -> str:
-    with path.open(encoding="utf-8") as token_file:
-        if os.name != "nt" and stat.S_IMODE(os.fstat(token_file.fileno()).st_mode) & 0o077:
-            raise PermissionError("--token-file must not be accessible by group or other users")
-        return token_file.read().strip()
-
-
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", required=True, help="Task base URL up to and including /aichat")
@@ -290,7 +281,7 @@ def main() -> int:
     args = p.parse_args()
 
     try:
-        token = read_private_token_file(args.token_file)
+        token = args.token_file.read_text(encoding="utf-8").strip()
     except OSError as exc:
         print(f"error: unable to read token file {args.token_file}: {exc}", file=sys.stderr)
         return 2

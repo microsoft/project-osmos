@@ -2,7 +2,7 @@
 
 Project Osmos runs data engineering tasks in Microsoft Fabric. When you use this plugin to create, update, run, or poll a Project Osmos task, Microsoft may collect telemetry about the service request, task lifecycle, and product usage.
 
-To turn off telemetry for this plugin, do not invoke the `project-osmos` skill or its helper scripts, and uninstall or disable the plugin in GitHub Copilot CLI or Claude Code. The local dashboard files written under `.dataprojects/<task-id>/` stay on your machine unless you choose to share them.
+To turn off telemetry for this plugin, do not invoke the `project-osmos` skill or its helper scripts, and uninstall or disable the plugin in GitHub Copilot CLI or Claude Code. The local task state and audit files written under `.dataprojects/<task-id>/` stay on your machine unless you choose to share them.
 
 ## Data Collection
 

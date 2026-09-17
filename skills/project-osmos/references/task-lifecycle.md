@@ -122,7 +122,7 @@ Accepted shapes today (`204`):
 Rejected shape today (`400`):
 - `metadata: { "author": { "name": "user@contoso.com", "source": "copilot-cli" } }` (nested object)
 
-`scripts/post-user-message.py` emits flat keys so author attribution survives round-trip. The poller reassembles `entry.author = { name, source }` for the dashboard renderer regardless of server-returned shape, so both work if the service later accepts nested metadata.
+`scripts/post-user-message.py` emits flat keys so author attribution survives round-trip. The poller reassembles `entry.author = { name, source }` in the local task snapshot regardless of server-returned shape, so both work if the service later accepts nested metadata.
 
 ## Start run
 
@@ -157,7 +157,7 @@ Expected `task.status` string values are `Created`, `Running`, `Cancelling`, `Ca
 
 Expected message `role` string values are `User`, `Assistant`, and `System`.
 
-For outbound writes, use the string values above. For inbound reads, keep defensive compatibility: some deployed routes have returned numeric or stringified-numeric status/role values even though the canonical task API values are strings. The poller normalizes both forms so wire-shape drift does not break the dashboard.
+For outbound writes, use the string values above. For inbound reads, keep defensive compatibility: some deployed routes have returned numeric or stringified-numeric status/role values even though the canonical task API values are strings. The poller normalizes both forms so wire-shape drift does not break monitoring or recovery.
 
 
 Even with string enums, derive terminal states from `runDetails.completedAt` and `runDetails.errorMessage` rather than `task.status` alone. The poller transiently flips `task.status` back to `Running` while auto-retrying the documented Spark statement transient (clearing `completedAt` and `status_detail`), so use `completedAt + errorMessage` to decide whether a run is truly done.
@@ -196,13 +196,13 @@ target already populated` is not a gate and cannot be overridden by posting
 "proceed." If Osmos asks a generic question such as whether the original task
 contains a gate even though the contract says `Approval gates: none`, post at
 most one correction quoting that field. If the same intent appears again, rely
-on the dashboard's elicitation-loop signal and surface a handoff-contract
+on the poller's elicitation-loop signal in `state.json` and surface a handoff-contract
 failure instead of repeatedly posting answers or starting more runs.
 
 Before continuing, read `./.dataprojects/<task-id>/terminal.json` first when present, then `state.json`. Re-resolve the existing route and acquire a fresh token as needed; a token file or refresh command left by an exited poller may be stale. Then use the helper as one ordered operation:
 
 ```bash
-python3 skills/project-osmos/scripts/post-user-message.py \
+"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/post-user-message.py \
   --base-url "$TASKS_BASE" \
   --task-id "$TASK_ID" \
   --token-file "$TOKEN_FILE" \
@@ -221,7 +221,7 @@ The helper performs these steps:
 
 The message must succeed before the run request is attempted. If status lookup or message posting fails, no run is started. If the run request returns HTTP 409, fetch live status once: accept the conflict only when the task is now `Running`, and never send a second run request. For any other run failure, or a 409 without a live run, report that the message was posted but continuation did not start. The helper's JSON includes the before/after status decision, `run_start_attempted`, `run_started`, `run_active`, `run_start_outcome`, and `poller_restart_required`.
 
-After `poller_restart_required: true`, respawn `dashboard-poller.py` with fresh authentication and the existing `./.dataprojects/<task-id>/` directory. Do not reseed or overwrite the directory. Poller startup archives the prior `terminal.json`, preserves `state.json` and message de-duplication state, and captures the new operation, assistant messages, and terminal result. Verify the new poller process and surface authentication or startup failures.
+After `poller_restart_required: true`, ensure `dashboard-poller.py` is running with fresh authentication and the existing `./.dataprojects/<task-id>/` directory. Reuse a healthy existing poller; never start duplicate recovery workers. Do not reseed or overwrite the directory. Poller startup archives the prior `terminal.json`, preserves `state.json` and message de-duplication state, and captures the new operation, assistant messages, and terminal result. Verify the new poller process and surface authentication or startup failures. No browser page is required.
 
 
 The deployed status map is `0=Created`, `1=Running`, `2=Cancelling`, `3=Cancelled`, `4=Completed`, and `5=Failed`. Both numeric values and stringified numerics use this map. A nominal `Running` status with a non-empty `completedAt` or `errorMessage` is treated as no longer running.
