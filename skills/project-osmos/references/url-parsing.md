@@ -1,5 +1,7 @@
-# Parsing Fabric URLs to extract IDs
-Use this reference only when the user chooses **Provide a Lakehouse URL**. Workspace/Lakehouse names and Fabric page context are separate valid context paths owned by `SKILL.md`; do not redirect those paths here or require a URL.
+# Fabric URL intake and task links
+Use the intake-parsing sections only when the user chooses **Provide a Lakehouse URL**. Workspace/Lakehouse names and Fabric page context are separate valid context paths owned by `SKILL.md`; do not redirect those paths here or require a URL.
+
+[Task page URL construction](#task-page-url-construction) applies after every task starts, regardless of how its workspace and Lakehouse were selected.
 
 ## Ask for the Lakehouse URL
 Prompt the user with:
@@ -33,7 +35,10 @@ If the Lakehouse pattern matches and the host is supported, proceed. If only the
 If neither path pattern matches, treat the URL as malformed and ask the user to repaste it or choose the workspace/Lakehouse names path.
 
 ## Supported URL hosts
-Accept only the public Fabric browser hosts below.
+Accept only HTTPS URLs for the public Fabric browser hosts below, with no
+credentials and either the default port or port 443. Validate this before
+authentication or task creation so the later task-link launch uses the same
+portal policy. Ask for corrected context when validation fails.
 
 | Host | Notes |
 |---|---|
@@ -76,8 +81,21 @@ Parser:
 ```python
 def parse_fabric_url(url: str):
     value = url.strip()
-    normalized = value if "://" in value else f"https://{value}"
-    parts = urlsplit(normalized)
+    if any(character.isspace() or character == "\\" for character in value):
+        return None
+    normalized = value if re.match(r"^[a-z][a-z0-9+.-]*://", value, re.I) else f"https://{value}"
+    try:
+        parts = urlsplit(normalized)
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in {"http", "https"} or parts.username is not None:
+        return None
+    host = parts.netloc.lower()
+    if parts.hostname in {"app.fabric.microsoft.com", "app.powerbi.com"}:
+        if parts.scheme != "https" or port not in {None, 443}:
+            return None
+        host = parts.hostname
     workspace_match = WORKSPACE_PATH_RE.match(parts.path)
     if not workspace_match:
         return None
@@ -85,7 +103,6 @@ def parse_fabric_url(url: str):
     lakehouse_prefix = f"/groups/{workspace_match.group('ws')}/lakehouses/".lower()
     if parts.path.lower().startswith(lakehouse_prefix) and not lakehouse_match:
         return None
-    host = parts.netloc.lower()
     if host not in SUPPORTED_HOSTS:
         return None
 ```
@@ -102,3 +119,75 @@ Parser return:
 
 Use this inline parser in the agent's intake step; no separate script is required. An unsupported host or invalid path is rejected. A valid workspace-only path returns `lakehouse_id: None` to the context choices in `SKILL.md`; do not proceed to auth or task creation until a Lakehouse is selected.
 
+## Task page URL construction
+
+Use this flow after every task starts. All users receive the Fabric task link;
+no workspace or tenant enrollment signal is required.
+
+Run `scripts/launch-task-page.py`; do not reimplement the URL or browser logic
+inline. When a Fabric page or Lakehouse URL is available, pass it as
+`--source-url` so the helper preserves the environment and all unowned query
+tokens while replacing the task selection. Without a source URL, production
+uses `https://app.fabric.microsoft.com`; private environments must pass a
+trusted `--portal-base-url` instead of guessing a host. Production accepts only
+the supported HTTPS public portal hosts (default port or 443), without URL
+credentials. Private source/base URLs must already have been validated against
+the active environment's trusted portal context by the caller.
+Pass the environment token from routing, not a guessed label. Production
+spelling is case-insensitive; `production` is also normalized to `prod`.
+
+```text
+<scheme>://<netloc>/groups/<workspace_id>/lakehouses/<lakehouse_id>?<query>
+```
+
+`<query>` is the original pasted query string, transformed as follows:
+
+- **Swap `selectedPath`** — remove any existing `selectedPath=...` and
+  append `selectedPath=ProjectOsmos%2F<task-id>`. This is the only
+  per-task change (percent-encode the slash as `%2F`).
+- **Force `projectOsmosUX=1`** — replace any existing `projectOsmosUX`
+  value and add it if absent, so the Lakehouse task page renders.
+- **Preserve everything else verbatim** — keep each remaining parameter
+  exactly as pasted (`experience=power-bi`, other
+  flags). Do **not** decode/re-encode values; a round-trip through a
+  query parser could re-encode already-encoded
+  slashes and can change the URL the user relies on.
+
+Rebuild the path from the validated `workspace_id` / `lakehouse_id` so any
+table or sub-path in the pasted URL (e.g. `/tables/Invoice`) is dropped,
+and preserve the original scheme and netloc.
+
+Print `task_page_url` as `Task page` in the run card and surface it in chat.
+The helper attempts to open it in the default browser unless `--no-open` is
+needed. Browser opening is bounded to three seconds; a failed or timed-out
+launch is non-fatal: print the warning
+and URL and continue starting the headless recovery poller. The Fabric link is
+the only browser target; no local HTML fallback is created or opened.
+Opening is best-effort: the timeout bounds the helper's wait and stops its
+direct browser controller, not every descendant an OS or custom launcher may
+start. The helper does not manage the browser's process tree.
+The browser subprocess environment excludes `MWC_TOKEN`, `PBI_TOKEN`, and
+`BEARER` (case-insensitively), while retaining normal settings such as `BROWSER`
+and `DISPLAY`. The caller's environment is unchanged.
+If URL validation fails (exit 2), report the error and task ID, leave
+`task_page_url` unset, and start the recovery poller anyway. Correct the portal
+context and rerun this helper for the same task; never recreate the task or
+substitute a production host for missing private context.
+
+Use `PYTHON_RUNNER` selected by [Python helper runtime](python-helper-runtime.md):
+
+```bash
+"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/launch-task-page.py \
+  --environment prod \
+  --workspace-id <workspace-id> \
+  --lakehouse-id <lakehouse-id> \
+  --task-id <task-id> \
+  --source-url <optional-fabric-page-or-lakehouse-url>
+```
+
+The JSON response contains `task_page_url`, a non-fatal `warning`, and one
+structured `telemetry` object. The telemetry includes CLI origin, task-created
+state, launch result, fallback use, workspace ID, task ID,
+and environment. It never includes prompt or instruction content.
+The object is local structured output, not an automatic telemetry upload.
+`--no-open` reports `not_attempted`, without a failure warning or fallback.

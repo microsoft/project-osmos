@@ -63,7 +63,6 @@ jobs:
             --target "$GITHUB_SHA"
 
       - name: Verify release target
-        id: release-target
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -72,5 +71,3 @@ jobs:
             echo "::error::Release ${{ steps.version.outputs.tag }} points to ${target}, expected ${GITHUB_SHA}."
             exit 1
           fi
-          echo "source_sha=${target}" >> "$GITHUB_OUTPUT"
-

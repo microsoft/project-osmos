@@ -236,10 +236,7 @@ def check_version_bump(
     base_metadata = metadata_version(base_manifest, "base marketplace")
     current_metadata = metadata_version(current_manifest, "current marketplace")
     require_incremented(
-        current_metadata,
-        base_metadata,
-        "metadata.version",
-        issues,
+        current_metadata, base_metadata, "metadata.version", issues,
         allow_version_skip=allow_version_skip,
     )
 
@@ -261,10 +258,7 @@ def check_version_bump(
         else:
             label = f"plugins[{plugin_name!r} -> {current_plugin_name!r}].version"
         require_incremented(
-            current_version,
-            base_version,
-            label,
-            issues,
+            current_version, base_version, label, issues,
             allow_version_skip=allow_version_skip,
         )
 
@@ -314,9 +308,7 @@ def main() -> int:
         base_manifest = load_base_manifest(args.base_ref, marketplace_path)
         current_manifest = load_current_manifest(REPO_ROOT / marketplace_path)
         issues = check_version_bump(
-            base_manifest,
-            current_manifest,
-            allow_version_skip=args.allow_version_skip,
+            base_manifest, current_manifest, allow_version_skip=args.allow_version_skip,
         )
         versions_unchanged = manifest_versions_unchanged(base_manifest, current_manifest)
     except VersionBumpError as exc:

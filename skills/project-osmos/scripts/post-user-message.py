@@ -4,8 +4,8 @@
 
 The skill operates as a mediator between the human and the SparkCore orchestrator:
 every user message intended for the run is POSTed to the orchestrator with
-flat `metadata.author_name` / `metadata.author_source` values so the dashboard
-can attribute it without sending the nested metadata shape currently rejected
+flat `metadata.author_name` / `metadata.author_source` values to preserve
+attribution without sending the nested metadata shape currently rejected
 by deployed SparkCore-direct routes.
 
 Before posting, the helper fetches live task state for context. It posts the
@@ -14,8 +14,8 @@ the same task only when the post-message state is not running. An elicitation
 response therefore cannot be stranded when the run becomes terminal while the
 user is answering, and a message-post failure cannot start a run.
 
-Usage:
-    python3 skills/project-osmos/scripts/post-user-message.py \\
+Usage (Bash; select PYTHON_RUNNER using references/python-helper-runtime.md):
+    "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/post-user-message.py \\
         --base-url   https://.../aichat \\
         --task-id    <uuid> \\
         --token-file <path> \\
@@ -29,7 +29,8 @@ Exits 0 only when the message is accepted and any required run start succeeds.
 The default output remains the new message ID; `--output json` also reports the
 live status decision and whether a poller restart is required.
 
-The token is read from `--token-file` (chmod 600 expected) — never argv/env.
+The token is read from `--token-file` — never argv/env. On non-Windows systems,
+group/other permissions are rejected before reading; use chmod 600.
 """
 
 from __future__ import annotations

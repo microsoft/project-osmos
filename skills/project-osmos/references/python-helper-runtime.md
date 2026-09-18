@@ -10,7 +10,7 @@ environment. They require Python 3.11 or newer.
 ## Select one existing interpreter
 
 Resolve the runner once and reuse it for every helper in the run, including
-the detached dashboard poller:
+the detached recovery poller:
 
 1. If a virtual environment or Conda environment is active, use its `python`
    from the current `PATH` when it is Python 3.11 or newer.
@@ -25,6 +25,16 @@ the detached dashboard poller:
 Do not invoke `uv run` unless the `uv` environment already exists. Do not
 create `.venv`, alter dependency manifests or lockfiles, or switch
 interpreters partway through the task.
+
+For the Bash examples, retain the selected command as the `PYTHON_RUNNER`
+array. For a resolved executable path, use `PYTHON_RUNNER=("$selected_python")`;
+if the selected runner is the existing uv environment, use
+`PYTHON_RUNNER=(uv run --no-sync python)` (including `--active` when selected).
+Invoke it as `"${PYTHON_RUNNER[@]}"` so paths with spaces and multi-argument
+runners remain intact. Keep this same array for authentication, task-link
+launching, continuation, the detached poller, and its token-refresh command;
+do not perform a fresh `python3` lookup. In other shells, preserve the same
+selected executable and argument list using that shell's native syntax.
 
 Each helper enforces the same minimum before doing work. An older interpreter
 exits once with a message that names its path and version. Report that message

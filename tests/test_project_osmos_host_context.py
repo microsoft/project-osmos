@@ -60,7 +60,11 @@ class ProjectOsmosHostContextTests(unittest.TestCase):
         self.assertIn("search-consumption-cli", SKILL)
         self.assertIn("resolve the workspace by `displayName`", SKILL)
         self.assertIn("resolve the Lakehouse by `displayName`", SKILL)
-        self.assertIn("Use this reference only when the user chooses **Provide a Lakehouse URL**", URL_PARSING)
+        self.assertIn(
+            "Use the intake-parsing sections only when the user chooses "
+            "**Provide a Lakehouse URL**", URL_PARSING,
+        )
+        self.assertIn("applies after every task starts", URL_PARSING)
 
     def test_url_parser_uses_strict_path_uuid_patterns(self) -> None:
         self.assertIn("urlsplit(...).path", URL_PARSING)

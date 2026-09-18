@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -230,7 +231,11 @@ class LegacyEnvironmentCompatibilityTests(unittest.TestCase):
         marker = '```bash\n: "${MWC_TOKEN:?set MWC_TOKEN before spawning the poller}"'
         start = reference.index(marker) + len("```bash\n")
         end = reference.index("\n```", start)
-        return reference[start:end] + '\nprintf "%s" "$RESOURCE_TENANT_ID"\n'
+        return (
+            f"PYTHON_RUNNER=({shlex.quote(sys.executable)})\n"
+            + reference[start:end]
+            + '\nprintf "%s" "$RESOURCE_TENANT_ID"\n'
+        )
 
     def base_environment(self) -> dict[str, str]:
         return {

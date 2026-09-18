@@ -23,7 +23,7 @@ az account get-access-token \
 4. Upload the file to the selected task Lakehouse:
 
 ```bash
-python3 skills/project-osmos/scripts/upload-onelake-file.py \
+"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/upload-onelake-file.py \
   --source "$FULL_INSTRUCTION_FILE" \
   --workspace-id "$WORKSPACE_ID" \
   --lakehouse-id "$LAKEHOUSE_ID" \

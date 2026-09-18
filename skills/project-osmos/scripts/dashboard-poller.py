@@ -1,10 +1,12 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-"""Dashboard state poller for Project Osmos tasks.
+"""Headless task-state and recovery poller for Project Osmos tasks.
 
 Runs as a detached background process. Polls the SparkCore orchestrator
-on an adaptive cadence and rewrites `state.js` / `state.json` /
+on an adaptive cadence and rewrites `state.json` /
 `messages.ndjson` in the task's `.dataprojects/<task-id>/` directory.
+No HTML page or open browser is required. The legacy script name is retained
+so existing launch and resume commands continue to work.
 
 Designed so the LLM agent does not have to stay in a polling loop — see
 SKILL.md "Operating contract" for the rationale.
@@ -46,17 +48,19 @@ Auto-recovery (runs entirely inside the daemon, no agent involvement):
     assistant progress within --no-progress-window-seconds (default
     7200 = 2h, paused while auth-broken), give up.
 
-Run example (the skill spawns it like this):
+Run example (Bash; select PYTHON_RUNNER and compose REFRESH_CMD as documented
+in references/python-helper-runtime.md and references/dashboard-poller.md):
 
-  nohup python3 dashboard-poller.py \\
-      --base-url            "https://.../aichat/v1/.../tasks" \\
+  nohup env -u MWC_TOKEN -u PBI_TOKEN -u BEARER \\
+      "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/dashboard-poller.py \\
+      --base-url            "$TASKS_BASE" \\
       --task-id             "<guid>" \\
       --state-dir           ".dataprojects/<guid>" \\
       --token-file          ".dataprojects/<guid>/mwc-token" \\
       --auth-scheme         "mwctoken" \\
       --interval            60 \\
       --max-interval        180 \\
-      --token-refresh-cmd   "python3 .dataprojects/<guid>/refresh-mwc-token.py" \\
+      --token-refresh-cmd   "$REFRESH_CMD" \\
       > .dataprojects/<guid>/poller.log 2>&1 &
   echo $! > .dataprojects/<guid>/poller.pid
 """
@@ -105,13 +109,13 @@ AUTH_BODY_HINTS = ("unauthorized", "token", "invalid_token", "authentication", "
 #     0 = User, 1 = Assistant, 2 = Tool (legacy), 3 = System
 # We accept all forms defensively for inbound classification. There is
 # legacy payloads in older runs use 2/Tool; we route both into
-# DROPPED_ROLES so the dashboard never renders them.
+# DROPPED_ROLES so they remain audit-only.
 ASSISTANT_ROLES = {1, "1", "Assistant", "assistant"}
 USER_ROLES = {0, "0", "User", "user"}
 TOOL_ROLES = {2, "2", "Tool", "tool"}
 SYSTEM_ROLES = {3, "3", "System", "system"}
 
-DROPPED_ROLES = TOOL_ROLES | SYSTEM_ROLES  # never rendered in dashboard
+DROPPED_ROLES = TOOL_ROLES | SYSTEM_ROLES  # audit-only
 
 
 # ----------------------------- HTTP -----------------------------
@@ -494,8 +498,7 @@ def error_signature(operation_id: str | None, completed_at: str | None, error_me
 
 
 # Patterns that look like credentials and must be scrubbed before persisting
-# error text into state.json (which the dashboard reads as state.js, fully
-# visible in the browser). Spark statement errors don't usually carry
+# error text into state.json. Spark statement errors don't usually carry
 # secrets, but lakehouse mount errors, ABFS path errors, and notebook
 # stack traces can include SAS query strings, account keys, bearer tokens,
 # user-provided connection strings, or customer-identifying storage/file paths.
@@ -654,17 +657,8 @@ def merge_messages(existing: list[dict[str, Any]], polled: list[dict[str, Any]])
             "role": role,
             "text": text,
         }
-        # Preserve author metadata when present (mediator pattern: user
-        # follow-ups POSTed via post-user-message.py carry author info so
-        # the dashboard can show "👤 <name>" on each bubble).
-        #
-        # We accept two shapes because the SparkCore-direct POST /messages
-        # Some deployed binders reject nested objects inside metadata
-        # today, so post-user-message.py sends flat author_name/author_source
-        # keys. Once the server widens metadata to dict[str, Any] the nested
-        # metadata.author = {name, source} shape will also round-trip.
-        # Normalize both into entry.author = {name, source} so the dashboard
-        # renderer at assets/dashboard.html doesn't need to know either way.
+        # Accept flat author keys from deployed routes and nested metadata
+        # from newer routes, preserving attribution in the task snapshot.
         meta = m.get("metadata") or {}
         author = None
         if isinstance(meta, dict):
@@ -704,7 +698,7 @@ def append_ndjson(ndjson_path: Path, polled: list[dict[str, Any]], ndjson_seen: 
     """Append never-before-seen message ids (any role) to messages.ndjson.
 
     The caller maintains `ndjson_seen` separately from `state.messages` so that
-    tool/system messages — which are dropped from the dashboard feed — are
+    tool/system messages — which are dropped from the progress snapshot — are
     still recorded exactly once in the audit log. Without this set the old
     implementation re-appended tool/system messages on every poll, causing
     unbounded growth on long runs.
@@ -761,16 +755,11 @@ def load_ndjson_seen(ndjson_path: Path) -> set[str]:
 
 def write_state(state_dir: Path, state: dict[str, Any]) -> None:
     state_json_path = state_dir / "state.json"
-    state_js_path = state_dir / "state.js"
-    # Defensive backfill: the dashboard refuses to render when schema_version is
-    # missing. A seed file written by the skill before the poller starts may
-    # omit it; setdefault here heals the snapshot on the next poll cycle so the
-    # dashboard's mismatch banner clears without manual intervention.
+    # Preserve the existing state schema for CLI resume and audit consumers.
     state.setdefault("schema_version", 1)
     state.setdefault("recovery", {})
     payload = json.dumps(state, indent=2)
     atomic_write(state_json_path, payload)
-    atomic_write(state_js_path, "window.__STATE = " + payload + ";\n")
 
 
 # ----------------------------- recovery: token + retry -----------------------------
@@ -938,8 +927,8 @@ class TokenManager:
 class RecoveryState:
     """In-memory recovery state machine for auto-retry and auth-broken modes.
 
-    Persisted into `state["recovery"]` on each write_state so the dashboard
-    can render banners and pills.
+    Persisted into `state["recovery"]` on each write_state for CLI diagnostics
+    and resume.
     """
     auto_retries_total: int = 0
     last_retry_at: str | None = None
@@ -962,10 +951,8 @@ class RecoveryState:
 
     # ----- mid-run-error visibility (sticky across the wipe) -----
     # When the daemon decides to auto-retry, it wipes task.completed_at /
-    # task.status_detail / sets task.status="Running" so the dashboard
-    # stops showing terminal. Without these sticky fields the user would
-    # see the retry-count pill increment with NO visible explanation of
-    # what failed. Captured BEFORE the wipe; cleared on the first fresh
+    # task.status_detail / sets task.status="Running". Preserve the cause
+    # before resetting status so retries remain explainable. Cleared on the first fresh
     # assistant append after the retry's message-seq watermark, or
     # carried forward into terminal.json on exit.
     last_trigger_error: str | None = None
@@ -1009,7 +996,7 @@ class RecoveryState:
 
         Transport-only state such as auth_broken visibility monotonic timers is
         process-local, but retry counters, trigger details, and progress
-        timestamps are run-level dashboard state and should survive respawns.
+        timestamps are run-level task state and should survive respawns.
         """
         if state.get("terminal"):
             return
@@ -1066,7 +1053,7 @@ def write_terminal_json(state_dir: Path, payload: dict[str, Any]) -> None:
 
 def write_terminal_state(state_dir: Path, state: dict[str, Any],
                          payload: dict[str, Any]) -> None:
-    """Write terminal.json and mirror it into state.json/state.js."""
+    """Write terminal.json and mirror it into state.json."""
     write_terminal_json(state_dir, payload)
     state["terminal"] = payload
     write_state(state_dir, state)
@@ -1671,8 +1658,7 @@ def _handle_terminal_failed(  # noqa: PLR0915
             f"auto_retry: POST /run status={post_result.status}; "
             f"resuming poll (auto_retries_total={recovery.auto_retries_total})"
         )
-        # Clear task.completed_at / status_detail / status so dashboard
-        # stops showing terminal. Next poll will re-populate.
+        # Clear stale terminal fields while the new run starts.
         task_block = task_state_block(state)
         task_block.pop("completed_at", None)
         task_block.pop("status_detail", None)
@@ -1858,8 +1844,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
     state = load_state(state_dir / "state.json")
     # A respawned poller is live; clear any stale terminal payload left by a
-    # previous poller process so the dashboard's "Poller stopped" banner
-    # disappears. If the prior poller exited cleanly and wrote terminal state,
+    # previous poller process. If it exited cleanly and wrote terminal state,
     # this respawn is an explicit "try again" and should get a fresh retry
     # budget. If there is no terminal marker (machine sleep, OOM, kill -9),
     # hydrate run-scoped retry state so a simple resume does not lose context.
@@ -2016,7 +2001,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             state["messages"] = messages
 
             # Update task block. last_polled_at advances ONLY on successful polls
-            # so the dashboard's freshness signal is honest during auth_broken.
+            # so the snapshot does not claim fresh observations during auth_broken.
             task_block = task_state_block(state)
             task_block["id"] = args.task_id
             task_block["last_polled_at"] = now_iso()
@@ -2110,8 +2095,6 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         terminal_payload = _build_terminal_payload(
             args, recovery, tokens, state, exit_reason, exit_status
         )
-        # Also mirror into state.js so the dashboard (which cannot fetch a
-        # sibling JSON over file://) can render the exit reason banner.
         try:
             write_terminal_state(state_dir, state, terminal_payload)
         except Exception:  # noqa: BLE001

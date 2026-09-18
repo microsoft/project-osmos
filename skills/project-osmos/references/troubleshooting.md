@@ -27,13 +27,15 @@ Treat it as a Spark statement/token timeout limitation for long-running Project 
 
 ### What the daemon does — automatically
 
-`scripts/dashboard-poller.py` handles this case end-to-end without agent involvement:
+`scripts/dashboard-poller.py` handles this case end-to-end without agent involvement
+or an open browser page. It is a headless recovery process, not part of the
+Fabric page:
 
 - Match the normalized error string on `runDetails.errorMessage` (primary) or the latest assistant message appended this poll cycle (fallback).
 - Auto-retry each unique error signature (sha256 of `operationId|completedAt|err`) at most once via `POST /{taskId}/run` on the same task ID. Hard cap `--max-auto-retries`; time-based safety net `--no-progress-window-seconds`. If `operationId` is absent, the signature degrades to `sha256("|completedAt|err")` but still dedups correctly within a single run.
 
 
-- Use a small fixed retry backoff schedule, then a flat tail (`--retry-backoff-seconds`). Run `python3 skills/project-osmos/scripts/dashboard-poller.py --help` for exact defaults to avoid doc/script drift.
+- Use a small fixed retry backoff schedule, then a flat tail (`--retry-backoff-seconds`). Run `"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/dashboard-poller.py --help` with the selected runner for exact defaults to avoid doc/script drift.
 - Treat HTTP 409 from `POST /run` as retry success only when the follow-up task poll shows the run is already in flight (`Running` / acquiring). If the task is not runnable, report the 409 as a retry failure. Auth-class errors trigger one token refresh and one re-POST only when `--token-refresh-cmd` is configured; otherwise the poller enters `auth_status: "broken"` and waits for respawn with fresh credentials.
 - On giving up, write `terminal.json` with reason `max_auto_retries`, `no_progress_window`, `retry_signature_repeat`, or `run_post_failed_<HTTP>` so the agent can report exactly why on re-engage.
 
@@ -41,7 +43,7 @@ Treat it as a Spark statement/token timeout limitation for long-running Project 
 
 The agent does **not** manually `POST /run` for this error. If the poller is still running, polling will pick up the next state. If the poller has exited (`./.dataprojects/<task-id>/poller.pid` is gone), read `./.dataprojects/<task-id>/terminal.json` and report the `reason` field verbatim, plus `last_error_message`, `auto_retries_total`, and run identifiers (`task_id`, `operation_id`, `session_id`, `capacity_id`, `workspace_id`, `lakehouse_id`) when present. `session_id` is best-effort because some routes do not return it in `runDetails`.
 
-If the user explicitly asks to keep trying after the daemon exhausted its budget, re-spawn the poller with `python3 skills/project-osmos/scripts/dashboard-poller.py` against the same task ID (per the resume guardrail in `SKILL.md`); the counters reset and another `--max-auto-retries` budget is available. Do **not** create a new task; that discards the checkpointed agent state.
+If the user explicitly asks to keep trying after the daemon exhausted its budget, re-spawn the poller with `"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/dashboard-poller.py` against the same task ID (per the resume guardrail in `SKILL.md`); the counters reset and another `--max-auto-retries` budget is available. Do **not** create a new task; that discards the checkpointed agent state.
 
 ## MWC token expiry mid-run
 
@@ -49,8 +51,8 @@ The MWC token typically expires after ~1.5h. `dashboard-poller.py` auto-refreshe
 
 - **Proactive**: refresh on a fixed cadence (`--token-refresh-interval`) by running `--token-refresh-cmd` and validating the new token with a cheap `GET /{taskId}` before swapping.
 - **Reactive**: when `--token-refresh-cmd` is configured, refresh on any auth-class 4xx (401, 403, or 400 with an auth-related body) and immediately retry the failed call.
-- **Auth broken**: if refresh keeps failing, or no refresh command is configured when the token is rejected, enter `auth_status: "broken"` and **stop advancing `last_polled_at`** (so the dashboard's freshness signal stays honest). With `--token-refresh-cmd`, retry refresh on bounded exponential backoff; without one, respawn the poller with a fresh readable initial token/refresh recipe.
+- **Auth broken**: if refresh keeps failing, or no refresh command is configured when the token is rejected, enter `auth_status: "broken"` and **stop advancing `last_polled_at`** (so the local snapshot does not claim fresh observations). With `--token-refresh-cmd`, retry refresh on bounded exponential backoff; without one, respawn the poller with a fresh readable initial token/refresh recipe.
 
-Default cadence and backoff values live in `python3 skills/project-osmos/scripts/dashboard-poller.py --help` rather than this doc so changing a default updates one place.
+Default cadence and backoff values live in `"${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/dashboard-poller.py --help` rather than this doc so changing a default updates one place.
 
 The agent does not need to manage tokens during a normal run. On re-engage, if `state.recovery.auth_status === "broken"`, first check `state.recovery.token_refresh_configured`. If true, ask the user to verify the `--token-refresh-cmd` recipe and re-spawn the poller with a corrected one. If false, there is no refresh recipe to fix; ask for a fresh readable initial token (`--token-file` or `MWC_TOKEN`) and optionally add a refresh command for later expiry. The task itself is unaffected — only the client's view of it is stale.

@@ -12,10 +12,10 @@ This helper performs the same sequence documented in the Project Osmos skill:
 5. If the global token exchange returns "Tenant not authorized for cluster",
    retry token exchange on the routed home cluster observed in step 3.
 6. Write a local token file plus non-secret Bash and PowerShell exports for
-   the dashboard poller and task lifecycle helpers.
+   the headless recovery poller and task lifecycle helpers.
 
-Usage:
-    python3 skills/project-osmos/scripts/resolve-auth-and-routing.py \\
+Usage (Bash; select PYTHON_RUNNER using references/python-helper-runtime.md):
+    "${PYTHON_RUNNER[@]}" skills/project-osmos/scripts/resolve-auth-and-routing.py \\
       --workspace-id <workspace-guid> \\
       --lakehouse-id <lakehouse-guid> \\
       --output-dir .dataprojects/auth
