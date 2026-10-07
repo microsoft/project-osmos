@@ -15,6 +15,11 @@ Most contributions require agreement to the Microsoft Contributor License Agreem
 - Use [SECURITY.md](SECURITY.md) for vulnerability reporting instead of public issues.
 - Respect Microsoft trademarks and third-party license notices.
 
+The public plugin contains only `project-osmos-migration`, which guides users
+to install and verify Microsoft Skills for Fabric. It does not execute Osmos
+tasks. Keep the former standalone execution skill absent and preserve consent
+and active-task precautions in the [README](README.md#existing-tasks-and-legacy-recovery).
+
 ## Marketplace manifest contract
 
 The repository intentionally includes three regular marketplace JSON files because Copilot CLI, Claude Code, and Codex discover different paths:
