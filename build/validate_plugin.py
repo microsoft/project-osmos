@@ -10,9 +10,13 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+EXPECTED_COMPANION_REPOSITORY = "https://github.com/microsoft/project-osmos"
+EXPECTED_PLUGIN_NAMES = ["project-osmos"]
+EXPECTED_SKILLS = ["./skills/project-osmos-migration"]
 MARKETPLACE_JSON = REPO_ROOT / ".github" / "plugin" / "marketplace.json"
 CLAUDE_MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 CODEX_MARKETPLACE_JSON = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
@@ -29,6 +33,7 @@ FORBIDDEN_PATHS = [
     REPO_ROOT / ".codex-plugin",
     REPO_ROOT / "hooks" / "hooks.json",
 ]
+
 COPILOT_BASH_COMMAND = (
     'if [ "${PROJECT_OSMOS_UPDATE_HOOK:-}" = "1" ]; then exit 0; fi; '
     "PROJECT_OSMOS_UPDATE_HOOK=1 copilot plugin marketplace update project-osmos >/dev/null 2>&1; "
@@ -184,7 +189,7 @@ def validate_plugin_entry(marketplace_name: str, plugin: dict[str, Any]) -> list
     issues: list[str] = []
     name = plugin.get("name", "project-osmos")
 
-    for key in ("name", "description", "version", "source", "repository", "license", "keywords", "skills", "hooks"):
+    for key in ("name", "description", "version", "source", "repository", "license", "skills", "hooks"):
         if key not in plugin:
             issues.append(f"[{marketplace_name}/{name}] missing required plugin field: {key}")
 
@@ -205,7 +210,12 @@ def validate_plugin_entry(marketplace_name: str, plugin: dict[str, Any]) -> list
         if source_path != REPO_ROOT:
             issues.append(f"[{marketplace_name}/{name}] source must resolve to the repository root")
 
-    string_list(plugin.get("keywords"), issues, f"{marketplace_name}/{name}", "keywords")
+    if plugin.get("skills") != EXPECTED_SKILLS:
+        issues.append(f"[{marketplace_name}/{name}] skills must equal {EXPECTED_SKILLS!r}")
+    if EXPECTED_SKILLS == ["./skills/project-osmos-migration"]:
+        for field in ("keywords", "tags", "category"):
+            if field in plugin:
+                issues.append(f"[{marketplace_name}/{name}] migration-only plugin must not define execution discovery {field}")
 
     for skill_ref in string_list(plugin.get("skills"), issues, f"{marketplace_name}/{name}", "skills", allow_single=True):
         skill_dir = resolve_repo_path(REPO_ROOT, skill_ref)
@@ -320,9 +330,13 @@ def validate_marketplace(marketplace: dict[str, Any]) -> list[str]:
             issues.append(f"[{marketplace_name}] metadata.version must use MAJOR.MINOR.PATCH semver")
 
     plugins = marketplace.get("plugins")
-    if not isinstance(plugins, list) or len(plugins) != 1:
-        issues.append(f"[{marketplace_name}] plugins must include exactly one project-osmos entry")
+    if not isinstance(plugins, list) or len(plugins) != len(EXPECTED_PLUGIN_NAMES):
+        issues.append(f"[{marketplace_name}] plugins must match {EXPECTED_PLUGIN_NAMES}")
         return issues
+    if any(not isinstance(entry, dict) for entry in plugins):
+        return issues + [f"[{marketplace_name}] plugin entries must be objects"]
+    if [entry.get("name") for entry in plugins] != EXPECTED_PLUGIN_NAMES:
+        return issues + [f"[{marketplace_name}] plugin names/order must match {EXPECTED_PLUGIN_NAMES}"]
 
     entry = plugins[0]
     if not isinstance(entry, dict):
@@ -331,10 +345,9 @@ def validate_marketplace(marketplace: dict[str, Any]) -> list[str]:
 
     issues.extend(validate_plugin_entry(marketplace_name, entry))
 
-    if metadata_version is not None and entry.get("version") != metadata_version:
-        issues.append(f"[{marketplace_name}] metadata.version must match plugin entry version")
-
     return issues
+
+
 
 
 def validate_forbidden_paths() -> list[str]:
@@ -345,6 +358,110 @@ def validate_forbidden_paths() -> list[str]:
     for path in REPO_ROOT.rglob("plugin.json"):
         if ".git" not in path.parts and path not in FORBIDDEN_PATHS:
             issues.append(f"remove unsupported plugin artifact: {format_repo_path(path)}")
+    return issues
+
+
+def validate_successor_guidance(
+    repository: Any, documents: dict[str, str], *, expected_sources: set[str] | None = None,
+    allow_subset: bool = False,
+) -> list[str]:
+    if repository != EXPECTED_COMPANION_REPOSITORY:
+        return [f"companion repository must be {EXPECTED_COMPANION_REPOSITORY}"]
+    owner = EXPECTED_COMPANION_REPOSITORY.removeprefix("https://github.com/").split("/")[0]
+    expected = expected_sources if expected_sources is not None else {f"{owner}/skills-for-fabric"}
+    issues: list[str] = []
+    for label, content in documents.items():
+        sources = {
+            source.rstrip(".").removesuffix(".git")
+            for source in re.findall(
+                r"(?:github\.com/|(?<![\w./-]))([\w.-]+/skills-for-fabric[\w.-]*)", content,
+            )
+        }
+        if not (sources <= expected if allow_subset else sources == expected):
+            requirement = "from" if allow_subset else "exactly"
+            issues.append(f"{label}: successor sources must be {requirement} {sorted(expected)}")
+        for candidate in re.findall(
+            r"""(?:\b[a-z][a-z0-9+.-]*://|(?<![\w.-])[\w.-]+@[\w.-]+:)[^\s<>"'`()]+""",
+            content, re.I,
+        ):
+            if "skills-for-fabric" not in unquote(candidate).lower():
+                continue
+            address = candidate.rstrip(".,;")
+            if "://" not in address:
+                address = "ssh://" + address.replace(":", "/", 1)
+            try:
+                url = urlsplit(address)
+                path = unquote(url.path)
+                segments = path.strip("/").split("/")
+                transport_allowed = (
+                    url.scheme == "https" and url.username is None and url.port in (None, 443)
+                ) or (
+                    url.scheme == "ssh" and url.username == "git"
+                    and url.password is None and url.port in (None, 22)
+                )
+                valid_url = (
+                    transport_allowed and url.hostname == "github.com"
+                    and "/".join(segments[:2]).removesuffix(".git") in expected
+                    and not any(segment in (".", "..") for segment in segments)
+                    and "\\" not in path
+                )
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                issues.append(f"{label}: successor URL must use GitHub's canonical authority and a {sorted(expected)} path")
+    return issues
+
+
+def validate_companion() -> list[str]:
+    issues: list[str] = []
+    if (REPO_ROOT / "skills" / "project-osmos").exists():
+        issues.append("remove the retired standalone skill tree")
+    skill_root = REPO_ROOT / "skills"
+    if skill_root.is_symlink() or not skill_root.is_dir():
+        issues.append("skill root must be a regular directory")
+    elif {path.name for path in skill_root.iterdir()} != {
+        Path(skill).name for skill in EXPECTED_SKILLS
+    }:
+        issues.append("skill root must contain only the declared profile skill")
+    if EXPECTED_SKILLS == ["./skills/project-osmos-migration"]:
+        issues.extend(validate_public_migration_skill())
+    try:
+        plugin = first_plugin_entry(load_json(MARKETPLACE_JSON)) or {}
+        documents = {
+            name: (REPO_ROOT / name).read_text(encoding="utf-8")
+            for name in ("README.md", ".github/workflows/release-plugin.yml")
+        }
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"missing or unreadable companion resource: {exc}"]
+    issues.extend(validate_successor_guidance(plugin.get("repository"), documents))
+    if "fabric-skills@fabric-collection" not in documents["README.md"]:
+        issues.append("README must identify the SFF replacement plugin")
+    return issues
+
+
+def validate_public_migration_skill() -> list[str]:
+    root = REPO_ROOT / "skills" / "project-osmos-migration"
+    if first_symlink_component(root) is not None or any(
+        path.is_symlink() for path in root.rglob("*")
+    ):
+        return ["public migration skill must not contain symlinks"]
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+    if files != {"SKILL.md"}:
+        return ["public migration skill must contain only SKILL.md"]
+    issues = validate_skill_frontmatter(root / "SKILL.md")
+    if issues:
+        return issues
+    skill = (root / "SKILL.md").read_text(encoding="utf-8")
+    frontmatter = skill.split("---", 2)[1]
+    if "name: project-osmos-migration" not in frontmatter.splitlines() or "disable-model-invocation:" in frontmatter:
+        issues.append("public migration skill must have its own discoverable identity")
+    issues.extend(validate_successor_guidance(
+        EXPECTED_COMPANION_REPOSITORY, {"public migration skill": skill},
+        expected_sources={"microsoft/skills-for-fabric"},
+    ))
+    for required in ("fabric-skills@fabric-collection", "../../README.md#move-to-sff"):
+        if required not in skill:
+            issues.append(f"public migration skill must reference {required}")
     return issues
 
 
@@ -429,6 +546,7 @@ def main() -> int:
     issues = validate_marketplace(marketplace)
     issues.extend(validate_native_marketplace_manifests(marketplace))
     issues.extend(validate_forbidden_paths())
+    issues.extend(validate_companion())
 
     if issues:
         for issue in issues:
